@@ -103,6 +103,8 @@ class LLMProvider(LLMProviderBase):
             workdir=str(workdir),
             allowed_tools=list(config.get("allowed_tools") or ["Read", "Grep", "Glob"]),
             permission_mode=config.get("permission_mode") or "default",
+            # 默认 low：语音场景以快速应答为主，实测工具类问题从约 6 秒降到约 4 秒
+            effort=str(config.get("effort", "low") or "").strip() or None,
         )
         self.turn_timeout = float(config.get("turn_timeout_seconds") or 120)
         self.idle_timeout = float(config.get("idle_timeout_seconds") or 300)
@@ -130,7 +132,8 @@ class LLMProvider(LLMProviderBase):
                                  encoding="utf-8", timeout=15)
             logger.bind(tag=TAG).info(
                 f"Claude Code: {out.stdout.strip() or out.stderr.strip()} ({self.cli_path})，"
-                f"工作目录 {self.session_config.workdir}，允许工具 {self.session_config.allowed_tools}"
+                f"工作目录 {self.session_config.workdir}，允许工具 {self.session_config.allowed_tools}，"
+                f"思考力度 {self.session_config.effort or '默认'}"
             )
         except Exception as e:
             logger.bind(tag=TAG).error(f"无法运行 {self.cli_path} --version: {e}")

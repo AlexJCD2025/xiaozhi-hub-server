@@ -50,6 +50,7 @@ class ClaudeSessionConfig:
     workdir: Optional[str] = None
     allowed_tools: List[str] = field(default_factory=lambda: ["Read", "Grep", "Glob"])
     permission_mode: str = "default"
+    effort: Optional[str] = None  # 思考力度：low / medium / high / xhigh / max，None 表示用 Claude Code 默认值
     system_prompt_append: str = ""
 
 
@@ -99,6 +100,8 @@ class ClaudeSession(AgentSession):
             },
             stderr=self._stderr_tail.append,
         )
+        if self.config.effort:
+            kwargs["effort"] = self.config.effort
         if self.resume_id:
             kwargs["resume"] = self.resume_id
         else:

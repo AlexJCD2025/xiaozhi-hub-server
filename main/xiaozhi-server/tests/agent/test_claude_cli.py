@@ -120,7 +120,8 @@ def test_options_restrict_tools_and_new_session_id():
     assert o.session_id == s.session_id and o.resume is None
     assert o.system_prompt["append"] == "规则" and o.setting_sources == []
     r = ClaudeSession(ClaudeSessionConfig(), resume_id="old")._options()
-    assert r.resume == "old"
+    assert r.resume == "old" and r.effort is None
+    assert ClaudeSession(ClaudeSessionConfig(effort="low"))._options().effort == "low"
 
 
 async def test_can_use_tool_denies_outside_whitelist():
@@ -217,6 +218,13 @@ def conn(sid="conn-1", device="dev-1", intent="nointent"):
 def run(p, c, text, system="你是小智"):
     return "".join(p.response(c.session_id, [{"role": "system", "content": system},
                                              {"role": "user", "content": text}]))
+
+
+def test_effort_defaults_to_low(provider, tmp_path):
+    assert provider.session_config.effort == "low"
+    p = provider_mod.LLMProvider({"cli_path": str(tmp_path / "x"), "workdir": str(tmp_path / "w"), "effort": ""})
+    assert p.session_config.effort is None  # 留空表示用 Claude Code 默认值
+    p._loop.call_soon_threadsafe(p._loop.stop)
 
 
 def test_provider_reuses_one_process_across_turns(provider):
