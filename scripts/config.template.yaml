@@ -1,0 +1,37 @@
+# xiaozhi-hub-server 本地配置（会覆盖 config.yaml 中的同名配置）
+# 由安装脚本生成。此文件不会提交到 Git，API Key 只写在这里。
+# 大模型、API Key、语音识别 / 合成等，都可以在管理后台 http://<本机IP>:8003/admin 中修改。
+
+selected_module:
+  VAD: SileroVAD
+  ASR: FunASR
+  LLM: ClaudeCLI          # 安装时根据是否找到 Claude Code 自动选择
+  TTS: EdgeTTS
+  Memory: nomem
+  Intent: nointent        # 使用 Claude CLI 时必须是 nointent
+
+LLM:
+  # 本机 Claude Code（需要先安装并登录）
+  ClaudeCLI:
+    type: claude_cli
+    cli_path: ""                    # 留空自动查找
+    model: haiku                    # 留空使用 Claude Code 默认模型
+    workdir: ~/xiaozhi-workspace    # Claude Code 只能访问这个目录
+    allowed_tools: [Read, Grep, Glob]   # 默认只读；放开 Bash/Write 等需谨慎
+    permission_mode: default
+    turn_timeout_seconds: 120
+    idle_timeout_seconds: 300
+    resume_window_minutes: 120
+    resume_keywords: [接着上次聊, 继续上次的话题, 继续刚才的话题, 接着刚才聊]
+    first_reply_filler: 好的，我看一下
+    filler_delay_seconds: 2
+
+  # Claude API（OpenAI 兼容接口），在管理后台填写 API Key 后可切换使用
+  ClaudeAPI:
+    type: openai
+    base_url: https://api.anthropic.com/v1/
+    model_name: claude-haiku-5-5
+    api_key: 你的Claude API Key
+    max_tokens: 500
+    extra_body:
+      reasoning_effort: none        # 关闭隐藏思考，否则首字慢且可能没有回复
