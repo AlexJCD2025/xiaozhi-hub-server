@@ -12,6 +12,7 @@
 import asyncio
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,17 @@ COMMON_CLI_PATHS = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
 ]
+
+
+def single_sentence(text: str) -> str:
+    """把一句话整理成 TTS 只会切出一段的形式。
+
+    原项目为了降低首字延迟，第一句遇到逗号、顿号等就会切开，填充语会因此变成两段（两个气泡）。
+    这里把句中的停顿标点换成空格，结尾统一用句号。
+    """
+    body = re.sub(r"[，,、~～；;：:]+", " ", text or "").strip()
+    body = body.rstrip("。.！!？? ")
+    return f"{body}。" if body else ""
 
 
 def find_claude_cli(configured: Optional[str] = None) -> Optional[str]:
@@ -96,7 +108,7 @@ class LLMProvider(LLMProviderBase):
         self.idle_timeout = float(config.get("idle_timeout_seconds") or 300)
         self.resume_window = float(config.get("resume_window_minutes") or 120)
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
-        self.filler = config.get("first_reply_filler", "好的，我看一下")
+        self.filler = single_sentence(config.get("first_reply_filler", "好的，我看一下"))
         self.filler_delay = float(config.get("filler_delay_seconds") or 2)
         self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
 
@@ -253,7 +265,7 @@ class LLMProvider(LLMProviderBase):
                     elapsed = time.time() - t0
                     if first_at is None and self.filler and not filler_sent and elapsed >= self.filler_delay:
                         filler_sent = True
-                        yield f"😶{self.filler}。"
+                        yield f"😶{self.filler}"
                     if elapsed >= self.turn_timeout:
                         logger.bind(tag=TAG).warning(f"本轮超过 {int(self.turn_timeout)} 秒，已中断")
                         if st.agent:

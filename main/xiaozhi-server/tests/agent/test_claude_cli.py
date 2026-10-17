@@ -278,7 +278,13 @@ def test_filler_when_slow(provider):
     c = conn()
     provider.on_conn_open(c)
     out = run(provider, c, "查个东西")
-    assert out.startswith("😶好的，我看一下。") and out.endswith("🙂好")
+    assert out.startswith("😶好的 我看一下。") and out.endswith("🙂好")
+
+
+def test_single_sentence():
+    assert provider_mod.single_sentence("好的，我看一下") == "好的 我看一下。"
+    assert provider_mod.single_sentence("稍等~马上好！") == "稍等 马上好。"
+    assert provider_mod.single_sentence("") == ""
 
 
 def test_error_is_spoken_friendly(provider):
