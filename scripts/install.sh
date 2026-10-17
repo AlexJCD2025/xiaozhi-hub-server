@@ -49,12 +49,17 @@ info "$(uv --version)"
 # ---------- 2. 系统依赖：opus、ffmpeg ----------
 step "检查系统依赖（opus、ffmpeg）"
 if [[ "$OS" == "Darwin" ]]; then
-  command -v brew >/dev/null 2>&1 || fail "未找到 Homebrew，请先安装：https://brew.sh ，然后重新运行本脚本"
-  for pkg in opus ffmpeg; do
-    if brew list "$pkg" >/dev/null 2>&1; then info "$pkg 已安装"; else
-      info "安装 $pkg ..."; brew install "$pkg"
+  # 只看命令和库是否可用，不看由哪个 formula 提供（例如已装 ffmpeg-full 时不能再装 ffmpeg）
+  need=()
+  command -v ffmpeg >/dev/null 2>&1 || need+=(ffmpeg)
+  brew_prefix="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
+  [[ -n "$(ls "$brew_prefix"/lib/libopus*.dylib /usr/local/lib/libopus*.dylib 2>/dev/null)" ]] || need+=(opus)
+  if (( ${#need[@]} == 0 )); then info "opus、ffmpeg 已可用"; else
+    command -v brew >/dev/null 2>&1 || fail "缺少 ${need[*]}，且未找到 Homebrew。请先安装 Homebrew（https://brew.sh）或手动安装 ${need[*]}"
+    if ask "需要安装：${need[*]}，执行 brew install ${need[*]}？" Y; then brew install "${need[@]}"; else
+      fail "请手动安装 ${need[*]} 后重新运行本脚本"
     fi
-  done
+  fi
 else
   need=()
   command -v ffmpeg >/dev/null 2>&1 || need+=(ffmpeg)
