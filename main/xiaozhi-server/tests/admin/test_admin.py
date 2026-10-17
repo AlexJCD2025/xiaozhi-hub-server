@@ -116,7 +116,7 @@ async def test_setup_login_and_update_flow(client, cfg_path):
     st = await (await client.get("/admin/api/state")).json()
     assert st == {"needs_setup": True, "is_local": True, "logged_in": False}
 
-    r = await client.post("/admin/api/setup", json={"password": "short"})
+    r = await client.post("/admin/api/setup", json={"password": "abc12"})
     assert r.status == 400
     r = await client.post("/admin/api/setup", json={"password": "pass-1234"})
     assert r.status == 200

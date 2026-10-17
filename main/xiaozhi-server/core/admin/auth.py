@@ -7,7 +7,7 @@ import secrets
 import time
 
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = 6
 
 
 def hash_password(password: str) -> str:
