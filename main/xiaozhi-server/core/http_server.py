@@ -51,6 +51,10 @@ class SimpleHttpServer:
                             web.options(
                                 "/xiaozhi/ota/", self.ota_handler.handle_options
                             ),
+                            # [xiaozhi-hub] 兼容配网时漏写结尾斜杠的 OTA 地址（否则返回 404 且无日志）
+                            web.get("/xiaozhi/ota", self.ota_handler.handle_get),
+                            web.post("/xiaozhi/ota", self.ota_handler.handle_post),
+                            web.options("/xiaozhi/ota", self.ota_handler.handle_options),
                             # 下载接口，仅提供 data/bin/*.bin 下载
                             web.get(
                                 "/xiaozhi/ota/download/{filename}",
