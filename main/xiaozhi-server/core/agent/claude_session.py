@@ -5,6 +5,8 @@
 """
 
 import asyncio
+import json
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -17,13 +19,20 @@ from claude_agent_sdk import (
     CLINotFoundError,
     PermissionResultAllow,
     PermissionResultDeny,
+    RateLimitEvent,
     ResultMessage,
     StreamEvent,
+    SystemMessage,
     TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
 )
 from claude_agent_sdk import ClaudeSDKError
 
 from core.agent.agent_session import (
+    Activity,
     AgentEvent,
     AgentSession,
     AgentSessionError,
@@ -145,6 +154,46 @@ class ClaudeSession(AgentSession):
     def alive(self) -> bool:
         return self._client is not None
 
+    # ---------- 日志 ----------
+
+    def _log(self, level: str, message: str) -> None:
+        if self.logger:
+            getattr(self.logger, level)(f"[{self._session_id[:8]}] {message}")
+
+    def _log_message(self, msg) -> None:
+        """把 SDK 的非文字事件记到日志里，方便排查卡顿、限流、工具出错等问题。"""
+        if isinstance(msg, AssistantMessage):
+            prefix = "子代理" if msg.parent_tool_use_id else ""
+            for block in msg.content:
+                if isinstance(block, ToolUseBlock):
+                    brief = json.dumps(block.input, ensure_ascii=False)[:160]
+                    self._log("info", f"{prefix}调用工具 {block.name} {brief}")
+                elif isinstance(block, ThinkingBlock):
+                    self._log("debug", f"{prefix}思考 {len(block.thinking or '')} 字")
+            if msg.error:
+                self._log("warning", f"assistant 错误 {msg.error}")
+        elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, ToolResultBlock) and block.is_error:
+                    self._log("warning", f"工具返回错误：{str(block.content)[:200]}")
+        elif isinstance(msg, RateLimitEvent):
+            info = msg.rate_limit_info
+            self._log("warning" if getattr(info, "status", "") not in ("allowed", None) else "info",
+                      f"限流状态 status={getattr(info, 'status', None)} type={getattr(info, 'rate_limit_type', None)} "
+                      f"utilization={getattr(info, 'utilization', None)} resets_at={getattr(info, 'resets_at', None)}")
+        elif isinstance(msg, SystemMessage):
+            data = msg.data or {}
+            if msg.subtype == "init":
+                self._log("debug", f"system init model={data.get('model')} tools={data.get('tools')}")
+            elif msg.subtype in ("status", "thinking_tokens"):
+                self._log("debug", f"system {msg.subtype} {data.get('status') or data.get('estimated_tokens')}")
+            else:
+                self._log("info", f"system {msg.subtype} {json.dumps(data, ensure_ascii=False, default=str)[:200]}")
+        elif isinstance(msg, ResultMessage):
+            self._log("info" if not msg.is_error else "warning",
+                      f"本轮结果 {msg.subtype} 轮数={msg.num_turns} API耗时={msg.duration_api_ms}ms "
+                      f"费用={msg.total_cost_usd} 出错={msg.is_error}")
+
     # ---------- 一轮对话 ----------
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:
@@ -154,9 +203,15 @@ class ClaudeSession(AgentSession):
         self._interrupting = False
         streamed = False  # 当前这条 assistant 消息是否已经通过逐字流输出过
         last_char = ""
+        last_activity = 0.0
         try:
             await self._client.query(text)
             async for msg in self._client.receive_response():
+                self._log_message(msg)
+                is_text = isinstance(msg, StreamEvent) and (msg.event or {}).get("delta", {}).get("type") == "text_delta"
+                if not is_text and time.monotonic() - last_activity >= 1:
+                    last_activity = time.monotonic()
+                    yield Activity(type(msg).__name__)  # 节流：每秒最多一次
                 if isinstance(msg, StreamEvent):
                     if msg.parent_tool_use_id is not None:
                         continue  # 子代理的输出不读

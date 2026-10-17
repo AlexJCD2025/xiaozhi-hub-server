@@ -24,7 +24,7 @@ from typing import Dict, Optional
 
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
-from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
+from core.agent.agent_session import Activity, AgentSessionError, Done, Error, ErrorKind, TextDelta
 from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
 from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, wants_resume
@@ -107,6 +107,8 @@ class LLMProvider(LLMProviderBase):
             effort=str(config.get("effort", "low") or "").strip() or None,
         )
         self.turn_timeout = float(config.get("turn_timeout_seconds") or 120)
+        # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住
+        self.stall_timeout = float(config.get("stall_timeout_seconds") or 30)
         self.idle_timeout = float(config.get("idle_timeout_seconds") or 300)
         self.resume_window = float(config.get("resume_window_minutes") or 120)
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
@@ -257,6 +259,7 @@ class LLMProvider(LLMProviderBase):
         asyncio.run_coroutine_threadsafe(self._run_turn(st, text, system_prompt, out), self._loop)
 
         t0 = time.time()
+        last_event_at = t0
         first_at = None
         filler_sent = False
         finished = False
@@ -269,13 +272,21 @@ class LLMProvider(LLMProviderBase):
                     if first_at is None and self.filler and not filler_sent and elapsed >= self.filler_delay:
                         filler_sent = True
                         yield f"😶{self.filler}"
-                    if elapsed >= self.turn_timeout:
-                        logger.bind(tag=TAG).warning(f"本轮超过 {int(self.turn_timeout)} 秒，已中断")
+                    stalled = time.time() - last_event_at >= self.stall_timeout
+                    if elapsed >= self.turn_timeout or stalled:
+                        kind = ErrorKind.STALLED if stalled else ErrorKind.TIMEOUT
+                        logger.bind(tag=TAG).warning(
+                            f"已中断本轮：{'连续 %d 秒没有任何响应' % int(self.stall_timeout) if stalled else '超过 %d 秒' % int(self.turn_timeout)}"
+                        )
                         if st.agent:
                             asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
-                        yield Error(ErrorKind.TIMEOUT).voice_message
+                        prefix = "" if (first_at is not None or filler_sent) else "😶"
+                        yield prefix + Error(kind).voice_message
                         finished = True
                         return
+                    continue
+                last_event_at = time.time()
+                if isinstance(ev, Activity):
                     continue
                 if isinstance(ev, TextDelta):
                     if first_at is None:

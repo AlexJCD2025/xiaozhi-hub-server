@@ -90,7 +90,8 @@ async def test_synthetic_error_message_not_spoken():
                       result()])
     evs = await collect(s)
     assert not [e for e in evs if isinstance(e, TextDelta)]
-    assert isinstance(evs[0], Error) and evs[0].kind == ErrorKind.RATE_LIMIT
+    errors = [e for e in evs if isinstance(e, Error)]
+    assert errors and errors[0].kind == ErrorKind.RATE_LIMIT
 
 
 async def test_interrupted_result_is_done_not_error():
@@ -106,6 +107,15 @@ async def test_interrupted_result_is_done_not_error():
     evs = await collect(s)
     assert isinstance(evs[-1], Done) and evs[-1].interrupted
     assert client.interrupted
+
+
+async def test_activity_reported_for_non_text_events_and_throttled():
+    s = session_with([assistant(ToolUseBlock(id="t", name="Glob", input={"pattern": "*"})),
+                      assistant(ToolUseBlock(id="t2", name="Read", input={})), delta("好"), result()])
+    evs = await collect(s)
+    acts = [e for e in evs if type(e).__name__ == "Activity"]
+    assert len(acts) == 1  # 1 秒内的多个非文字事件只上报一次
+    assert [e.text for e in evs if isinstance(e, TextDelta)] == ["好"]
 
 
 async def test_error_result_without_interrupt():
@@ -314,6 +324,31 @@ def test_turn_timeout_interrupts(provider):
     while FakeAgent.instances[0].interrupts == 0 and time.time() < deadline:
         time.sleep(0.05)
     assert FakeAgent.instances[0].interrupts >= 1
+
+
+def test_stall_timeout_interrupts_when_no_events(provider):
+    FakeAgent.delay = 5          # 5 秒内没有任何事件
+    provider.filler = ""
+    provider.stall_timeout = 0.5
+    provider.turn_timeout = 30
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "你好")
+    assert "没有回应" in out and out.startswith("😶")
+    deadline = time.time() + 2
+    while FakeAgent.instances[0].interrupts == 0 and time.time() < deadline:
+        time.sleep(0.05)
+    assert FakeAgent.instances[0].interrupts >= 1
+
+
+def test_activity_keeps_turn_alive(provider):
+    from core.agent.agent_session import Activity
+    provider.stall_timeout = 0.5
+    FakeAgent.script = [[Activity("tool")] * 1 + [TextDelta("🙂查完了"), Done()]]
+    FakeAgent.delay = 0.3       # 每段等待都短于无响应超时
+    c = conn()
+    provider.on_conn_open(c)
+    assert run(provider, c, "查一下").endswith("🙂查完了")
 
 
 def test_abort_and_close_hooks(provider):

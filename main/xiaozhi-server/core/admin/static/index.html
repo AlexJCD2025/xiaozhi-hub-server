@@ -115,7 +115,7 @@ const LABELS = {
   api_key: "API Key", base_url: "接口地址", url: "接口地址", model_name: "模型名称", model: "模型",
   cli_path: "CLI 路径（留空自动查找）", effort: "思考力度（low 更快，medium/high 更准；留空用默认）", workdir: "工作目录（Claude Code 只能访问这里）",
   allowed_tools: "允许的工具（逗号分隔；默认只读：Read, Grep, Glob）", permission_mode: "权限模式",
-  turn_timeout_seconds: "单轮超时（秒）", idle_timeout_seconds: "空闲多久关闭进程（秒）",
+  turn_timeout_seconds: "单轮超时（秒）", stall_timeout_seconds: "无响应超时（秒，连续这么久没有任何动静就中断）", idle_timeout_seconds: "空闲多久关闭进程（秒）",
   resume_window_minutes: "多久内重连自动接着聊（分钟）", resume_keywords: "接续关键字（逗号分隔）",
   first_reply_filler: "填充语（回复慢时先说的话，留空关闭）", filler_delay_seconds: "多久没回复说填充语（秒）",
   max_tokens: "最大输出 token", temperature: "temperature", top_p: "top_p",

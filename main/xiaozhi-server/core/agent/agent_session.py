@@ -19,6 +19,7 @@ class ErrorKind(str, Enum):
     SESSION_MISSING = "session_missing"
     PROCESS_EXITED = "process_exited"
     TIMEOUT = "timeout"
+    STALLED = "stalled"
     UNKNOWN = "unknown"
 
 
@@ -32,6 +33,7 @@ VOICE_ERROR_MESSAGES = {
     ErrorKind.SESSION_MISSING: "没有找到之前的对话，我们重新开始吧。",
     ErrorKind.PROCESS_EXITED: "Claude Code 意外退出了，再说一次试试。",
     ErrorKind.TIMEOUT: "这件事有点久，我稍后再告诉你。",
+    ErrorKind.STALLED: "Claude 那边一直没有回应，可能是网络或服务有点慢，稍后再问我一次吧。",
     ErrorKind.UNKNOWN: "出了点小问题，再说一次试试。",
 }
 
@@ -39,6 +41,13 @@ VOICE_ERROR_MESSAGES = {
 @dataclass
 class TextDelta:
     text: str
+
+
+@dataclass
+class Activity:
+    """Agent 仍在工作（思考、调用工具等），但没有产出要读出来的文字。用于判断是否卡住。"""
+
+    label: str = ""
 
 
 @dataclass
@@ -57,7 +66,7 @@ class Error:
         return VOICE_ERROR_MESSAGES.get(self.kind, VOICE_ERROR_MESSAGES[ErrorKind.UNKNOWN])
 
 
-AgentEvent = Union[TextDelta, Done, Error]
+AgentEvent = Union[TextDelta, Activity, Done, Error]
 
 
 class AgentSessionError(Exception):
