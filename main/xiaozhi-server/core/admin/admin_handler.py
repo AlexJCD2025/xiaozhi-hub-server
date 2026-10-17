@@ -14,6 +14,7 @@ from aiohttp import web
 
 from config.logger import setup_logging
 from core.admin import auth, config_store
+from core.admin.status import collect_status
 from core.utils.modules_initialize import initialize_modules
 
 TAG = __name__
@@ -45,9 +46,10 @@ class AdminHandler:
                 web.post("/admin/api/setup", self.handle_setup),
                 web.post("/admin/api/login", self.handle_login),
                 web.post("/admin/api/logout", self.handle_logout),
-                web.get("/admin/api/llm", self.handle_llm_list),
-                web.post("/admin/api/llm/select", self.handle_llm_select),
-                web.post("/admin/api/llm/{name}", self.handle_llm_update),
+                web.get("/admin/api/status", self.handle_status),
+                web.get("/admin/api/modules/{section}", self.handle_module_list),
+                web.post("/admin/api/modules/{section}/select", self.handle_module_select),
+                web.post("/admin/api/modules/{section}/entries/{name}", self.handle_module_update),
             ]
         )
 
@@ -145,67 +147,87 @@ class AdminHandler:
         response.del_cookie(COOKIE_NAME, path="/admin")
         return response
 
-    # ---------- 大模型配置 ----------
+    # ---------- 模块配置（LLM / ASR / TTS / Intent） ----------
 
     def _merged(self) -> dict:
         if self.config_path:
             return config_store.load_merged(custom_path=self.config_path)
         return config_store.load_merged()
 
-    async def handle_llm_list(self, request: web.Request):
-        self._require_login(request)
-        merged = self._merged()
-        return self._json(
-            {
-                "ok": True,
-                "selected": (merged.get("selected_module") or {}).get("LLM"),
-                "running": (self.config.get("selected_module") or {}).get("LLM"),
-                "items": config_store.list_llms(merged),
-            }
-        )
+    def _section(self, request: web.Request) -> str:
+        section = request.match_info["section"]
+        if section not in config_store.SECTIONS:
+            raise web.HTTPNotFound(text='{"ok": false, "error": "未知模块"}', content_type="application/json")
+        return section
 
-    async def handle_llm_update(self, request: web.Request):
+    async def handle_status(self, request: web.Request):
         self._require_login(request)
+        loop = asyncio.get_running_loop()
+        merged = self._merged()
+        status = await loop.run_in_executor(None, collect_status, self.config, merged)
+        return self._json({"ok": True, **status})
+
+    async def handle_module_list(self, request: web.Request):
+        self._require_login(request)
+        section = self._section(request)
+        data = config_store.describe_section(self._merged(), section)
+        data["running"] = (self.config.get("selected_module") or {}).get(section)
+        return self._json({"ok": True, **data})
+
+    async def handle_module_update(self, request: web.Request):
+        self._require_login(request)
+        section = self._section(request)
         name = request.match_info["name"]
         body = await self._read_json(request)
         try:
-            config_store.update_llm(name, body, self._merged(), self.config_path)
+            changed = config_store.update_entry(section, name, body, self._merged(), self.config_path)
         except KeyError:
-            return self._error(f"没有名为 {name} 的模型配置", 404)
-        self.logger.bind(tag=TAG).info(f"管理后台更新了模型配置: {name}")
-        return self._json({"ok": True, "applied": await self._apply_llm()})
+            return self._error(f"没有名为 {name} 的配置", 404)
+        except ValueError as e:
+            return self._error(f"格式不对：{e}", 400)
+        self.logger.bind(tag=TAG).info(f"管理后台更新了 {section}.{name}: {', '.join(changed) or '无变化'}")
+        result = await self._apply(section) if changed else {"applied": True, "note": "没有修改"}
+        return self._json({"ok": True, "changed": changed, **result})
 
-    async def handle_llm_select(self, request: web.Request):
+    async def handle_module_select(self, request: web.Request):
         self._require_login(request)
+        section = self._section(request)
         body = await self._read_json(request)
         name = str(body.get("name") or "")
         try:
-            config_store.select_llm(name, self._merged(), self.config_path)
+            config_store.select_entry(section, name, self._merged(), self.config_path)
         except KeyError:
-            return self._error(f"没有名为 {name} 的模型配置", 404)
-        self.logger.bind(tag=TAG).info(f"管理后台切换当前模型为: {name}")
-        return self._json({"ok": True, "applied": await self._apply_llm()})
+            return self._error(f"没有名为 {name} 的配置", 404)
+        self.logger.bind(tag=TAG).info(f"管理后台切换 {section} 为: {name}")
+        return self._json({"ok": True, **await self._apply(section)})
 
-    async def _apply_llm(self) -> bool:
-        """把磁盘上的 LLM 配置热加载到运行中的服务。
+    async def _apply(self, section: str) -> dict:
+        """把磁盘上的配置热加载到运行中的服务。
 
-        直接修改共享的 config 字典，再重建 LLM 实例。已建立的设备连接继续使用旧实例，
-        设备重新连接后才会用上新配置。
+        直接修改共享的 config 字典，再按模块重建实例：
+        - LLM、Intent：立即重建；
+        - ASR：后台重新加载（本地模型需要几秒）；
+        - TTS：每个连接各自创建，不用重建。
+        已建立的设备连接继续使用旧实例，设备重新连接后才会用上新配置。
         """
         merged = self._merged()
-        self.config["LLM"] = merged.get("LLM", {})
-        self.config.setdefault("selected_module", {})["LLM"] = merged["selected_module"]["LLM"]
+        self.config[section] = merged.get(section, {})
+        self.config.setdefault("selected_module", {})[section] = merged["selected_module"][section]
+        if section == "TTS":
+            return {"applied": True, "note": "设备重新连接后生效"}
         if self.ws_server is None:
-            return False
+            return {"applied": False, "note": "已保存，重启服务后生效"}
+        flags = {"LLM": "init_llm", "Intent": "init_intent", "ASR": "init_asr"}
+        attr = {"LLM": "_llm", "Intent": "_intent", "ASR": "_asr"}[section]
+        key = {"LLM": "llm", "Intent": "intent", "ASR": "asr"}[section]
         try:
             loop = asyncio.get_running_loop()
             async with self.ws_server.config_lock:
                 modules = await loop.run_in_executor(
-                    None,
-                    lambda: initialize_modules(self.logger, self.config, init_llm=True),
+                    None, lambda: initialize_modules(self.logger, self.config, **{flags[section]: True})
                 )
-                self.ws_server._llm = modules["llm"]
-            return True
+                setattr(self.ws_server, attr, modules[key])
+            return {"applied": True, "note": "已生效，设备重新连接后使用新配置"}
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"热加载 LLM 失败: {e}")
-            return False
+            self.logger.bind(tag=TAG).error(f"热加载 {section} 失败: {e}")
+            return {"applied": False, "note": f"已保存，但加载失败：{e}。请检查配置后重试，或重启服务"}

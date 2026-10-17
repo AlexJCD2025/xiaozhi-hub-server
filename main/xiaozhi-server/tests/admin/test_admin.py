@@ -19,6 +19,7 @@ LLM:
     base_url: https://api.anthropic.com/v1/
     model_name: claude-haiku-5-5
     api_key: 你的Claude API Key
+    max_tokens: 500
 """
 
 
@@ -35,51 +36,92 @@ def merged(cfg_path):
 
 # ---------- config_store ----------
 
-def test_list_llms_masks_and_flags_placeholder(cfg_path):
-    items = {i["name"]: i for i in config_store.list_llms(merged(cfg_path))}
-    assert items["ClaudeAPI"]["api_key_set"] is False
-    assert items["ClaudeAPI"]["api_key_hint"] == ""
-    assert items["ClaudeAPI"]["fields"]["model_name"] == "claude-haiku-5-5"
-    # 来自默认 config.yaml 的模型也在列表里
-    assert "ChatGLMLLM" in items
+def entry(section, name, path):
+    return next(e for e in config_store.describe_section(merged(path), section)["entries"] if e["name"] == name)
 
 
-def test_update_llm_writes_key_and_keeps_comments(cfg_path):
-    config_store.update_llm("ClaudeAPI", {"api_key": "sk-ant-1234567890abcdef"}, merged(cfg_path), cfg_path)
+def field(e, name):
+    return next(f for f in e["fields"] if f["name"] == name)
+
+
+def test_describe_masks_secret_and_flags_placeholder(cfg_path):
+    e = entry("LLM", "ClaudeAPI", cfg_path)
+    key = field(e, "api_key")
+    assert key["kind"] == "secret" and key["set"] is False and "value" not in key
+    assert e["needs_key"] is True
+    assert field(e, "model_name") == {"name": "model_name", "kind": "text", "value": "claude-haiku-5-5"}
+    assert field(e, "extra_body")["kind"] == "json"  # openai 类型允许新增 extra_body
+    # max_tokens 之类的字段不能被误判成密钥
+    assert config_store.field_kind("max_tokens", 500) == "number"
+    assert config_store.field_kind("access_token", "x") == "secret"
+    assert config_store.field_kind("token", "x") == "secret"
+    assert "ChatGLMLLM" in [x["name"] for x in config_store.describe_section(merged(cfg_path), "LLM")["entries"]]
+
+
+def test_update_writes_key_and_keeps_comments(cfg_path):
+    changed = config_store.update_entry("LLM", "ClaudeAPI", {"api_key": "sk-ant-1234567890abcdef"}, merged(cfg_path), cfg_path)
+    assert changed == ["api_key"]
     text = cfg_path.read_text(encoding="utf-8")
     assert "sk-ant-1234567890abcdef" in text
     assert "# 用户注释应被保留" in text and "# 行尾注释" in text
-    item = next(i for i in config_store.list_llms(merged(cfg_path)) if i["name"] == "ClaudeAPI")
-    assert item["api_key_set"] is True
-    assert item["api_key_hint"] == "sk-a…cdef"
+    key = field(entry("LLM", "ClaudeAPI", cfg_path), "api_key")
+    assert key["set"] is True and key["hint"] == "sk-a…cdef"
 
 
-def test_update_llm_empty_key_means_unchanged(cfg_path):
-    config_store.update_llm("ClaudeAPI", {"api_key": "sk-old-1234567890"}, merged(cfg_path), cfg_path)
-    config_store.update_llm("ClaudeAPI", {"api_key": "", "model_name": "claude-sonnet-5-5"}, merged(cfg_path), cfg_path)
-    entry = merged(cfg_path)["LLM"]["ClaudeAPI"]
-    assert entry["api_key"] == "sk-old-1234567890"
-    assert entry["model_name"] == "claude-sonnet-5-5"
+def test_update_empty_secret_means_unchanged(cfg_path):
+    config_store.update_entry("LLM", "ClaudeAPI", {"api_key": "sk-old-1234567890"}, merged(cfg_path), cfg_path)
+    config_store.update_entry("LLM", "ClaudeAPI", {"api_key": "", "model_name": "claude-sonnet-5-5"}, merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeAPI"]
+    assert e["api_key"] == "sk-old-1234567890" and e["model_name"] == "claude-sonnet-5-5"
 
 
-def test_update_llm_ignores_unknown_fields(cfg_path):
-    config_store.update_llm("ClaudeAPI", {"type": "evil", "foo": "bar"}, merged(cfg_path), cfg_path)
-    entry = merged(cfg_path)["LLM"]["ClaudeAPI"]
-    assert entry["type"] == "openai" and "foo" not in entry
+def test_update_converts_types(cfg_path):
+    config_store.update_entry("LLM", "ClaudeAPI", {"max_tokens": "800", "extra_body": '{"reasoning_effort": "none"}'},
+                              merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeAPI"]
+    assert e["max_tokens"] == 800 and e["extra_body"] == {"reasoning_effort": "none"}
+    with pytest.raises(ValueError):
+        config_store.update_entry("LLM", "ClaudeAPI", {"extra_body": "[1, 2]"}, merged(cfg_path), cfg_path)
+    with pytest.raises(ValueError):
+        config_store.update_entry("LLM", "ClaudeAPI", {"max_tokens": "abc"}, merged(cfg_path), cfg_path)
 
 
-def test_update_default_llm_only_overrides_changed_field(cfg_path):
-    config_store.update_llm("ChatGLMLLM", {"api_key": "glm-key-1234567890"}, merged(cfg_path), cfg_path)
+def test_update_list_and_bool_fields(cfg_path):
+    cfg_path.write_text(CUSTOM_YAML + """  ClaudeCLI:
+    type: claude_cli
+    allowed_tools: [Read, Grep, Glob]
+    turn_timeout_seconds: 120
+""", encoding="utf-8")
+    config_store.update_entry("LLM", "ClaudeCLI", {"allowed_tools": "Read, Glob，Grep", "turn_timeout_seconds": "60"},
+                              merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeCLI"]
+    assert e["allowed_tools"] == ["Read", "Glob", "Grep"] and e["turn_timeout_seconds"] == 60
+    assert config_store.field_kind("enabled", True) == "bool"
+    assert config_store._convert("bool", "true", False) is True
+
+
+def test_update_ignores_unknown_fields(cfg_path):
+    assert config_store.update_entry("LLM", "ClaudeAPI", {"type": "evil", "foo": "bar"}, merged(cfg_path), cfg_path) == []
+    e = merged(cfg_path)["LLM"]["ClaudeAPI"]
+    assert e["type"] == "openai" and "foo" not in e
+
+
+def test_update_default_entry_only_overrides_changed_field(cfg_path):
+    config_store.update_entry("LLM", "ChatGLMLLM", {"api_key": "glm-key-1234567890"}, merged(cfg_path), cfg_path)
     custom = config_store.load_custom(cfg_path)
     assert dict(custom["LLM"]["ChatGLMLLM"]) == {"api_key": "glm-key-1234567890"}
     assert merged(cfg_path)["LLM"]["ChatGLMLLM"]["type"] == "openai"
 
 
-def test_select_llm(cfg_path):
-    config_store.select_llm("ChatGLMLLM", merged(cfg_path), cfg_path)
-    assert merged(cfg_path)["selected_module"]["LLM"] == "ChatGLMLLM"
+def test_select_entry_other_sections(cfg_path):
+    config_store.select_entry("TTS", "EdgeTTS", merged(cfg_path), cfg_path)
+    config_store.select_entry("Intent", "nointent", merged(cfg_path), cfg_path)
+    m = merged(cfg_path)["selected_module"]
+    assert m["TTS"] == "EdgeTTS" and m["Intent"] == "nointent" and m["LLM"] == "ClaudeAPI"
     with pytest.raises(KeyError):
-        config_store.select_llm("NoSuchLLM", merged(cfg_path), cfg_path)
+        config_store.select_entry("LLM", "NoSuchLLM", merged(cfg_path), cfg_path)
+    with pytest.raises(KeyError):
+        config_store.select_entry("VAD", "SileroVAD", merged(cfg_path), cfg_path)
 
 
 # ---------- auth ----------
@@ -125,22 +167,29 @@ async def test_setup_login_and_update_flow(client, cfg_path):
     r = await client.post("/admin/api/setup", json={"password": "another-pass"})
     assert r.status == 409
 
-    r = await client.post("/admin/api/llm/ClaudeAPI", json={"api_key": "sk-ant-abcdefghijklmnop"})
-    assert r.status == 200
-    data = await (await client.get("/admin/api/llm")).json()
-    item = next(i for i in data["items"] if i["name"] == "ClaudeAPI")
-    assert item["api_key_set"] is True
+    r = await client.post("/admin/api/modules/LLM/entries/ClaudeAPI", json={"api_key": "sk-ant-abcdefghijklmnop"})
+    assert r.status == 200 and (await r.json())["changed"] == ["api_key"]
+    data = await (await client.get("/admin/api/modules/LLM")).json()
+    item = next(i for i in data["entries"] if i["name"] == "ClaudeAPI")
+    assert next(f for f in item["fields"] if f["name"] == "api_key")["set"] is True
     assert "sk-ant-abcdefghijklmnop" not in str(data)  # 完整 Key 不回传
 
+    r = await client.post("/admin/api/modules/LLM/entries/ClaudeAPI", json={"extra_body": "not json"})
+    assert r.status == 400
+    r = await client.post("/admin/api/modules/TTS/select", json={"name": "EdgeTTS"})
+    assert r.status == 200 and (await r.json())["note"]
+    assert (await client.get("/admin/api/modules/VAD")).status == 404
+
     await client.post("/admin/api/logout", json={})
-    assert (await client.get("/admin/api/llm")).status == 401
+    assert (await client.get("/admin/api/modules/LLM")).status == 401
     assert (await client.post("/admin/api/login", json={"password": "pass-1234"})).status == 200
-    assert (await client.get("/admin/api/llm")).status == 200
+    assert (await client.get("/admin/api/modules/LLM")).status == 200
 
 
 async def test_requires_login_and_json(client):
-    assert (await client.get("/admin/api/llm")).status == 401
-    assert (await client.post("/admin/api/llm/select", json={"name": "ChatGLMLLM"})).status == 401
+    assert (await client.get("/admin/api/modules/LLM")).status == 401
+    assert (await client.get("/admin/api/status")).status == 401
+    assert (await client.post("/admin/api/modules/LLM/select", json={"name": "ChatGLMLLM"})).status == 401
     r = await client.post("/admin/api/setup", data="password=pass-1234",
                           headers={"Content-Type": "application/x-www-form-urlencoded"})
     assert r.status == 415
@@ -161,3 +210,23 @@ async def test_wrong_password(client):
     await client.post("/admin/api/logout", json={})
     r = await client.post("/admin/api/login", json={"password": "nope-nope"})
     assert r.status == 401
+
+
+async def test_status_endpoint(client):
+    await client.post("/admin/api/setup", json={"password": "pass-1234"})
+    data = await (await client.get("/admin/api/status")).json()
+    assert data["ok"] and data["addresses"]["ota"].endswith("/xiaozhi/ota/")
+    names = [c["name"] for c in data["checks"]]
+    assert "ffmpeg" in names and "opus" in names
+    assert set(data["modules"]) == {"LLM", "ASR", "TTS", "Intent"}
+
+
+def test_unchanged_fields_are_not_written(cfg_path):
+    before = cfg_path.read_text(encoding="utf-8")
+    changed = config_store.update_entry(
+        "LLM", "ClaudeAPI",
+        {"model_name": "claude-haiku-5-5", "base_url": "https://api.anthropic.com/v1/", "max_tokens": "500",
+         "api_key": "", "extra_body": "{}"},
+        merged(cfg_path), cfg_path)
+    assert changed == []  # 值都没变，空的 extra_body 也不算新增
+    assert "model_name: claude-haiku-5-5" in cfg_path.read_text(encoding="utf-8") and before != ""

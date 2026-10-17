@@ -2,19 +2,30 @@
 
 写入使用 ruamel.yaml 往返模式，保留用户文件里的注释和格式；
 读取合并后的配置时绕过 load_config 的缓存，保证拿到磁盘上的最新值。
+
+模块配置（LLM / ASR / TTS / Intent）用一套通用规则编辑：
+- 只能修改该条目在合并配置里已有的字段（少数允许新增的字段见 ADDABLE_FIELDS）；
+- 字段类型沿用原值：文本、数字、开关、字符串列表、JSON 对象；
+- 名字像密钥的字段只写不读，提交空值表示不修改。
 """
 
+import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from config.config_loader import get_project_dir, merge_configs, read_config
 
-# 管理后台允许修改的 LLM 字段
-EDITABLE_LLM_FIELDS = ("api_key", "base_url", "url", "model_name")
+SECTIONS = ("LLM", "ASR", "TTS", "Intent")
+SECRET_FIELD = re.compile(
+    r"(^token$|api_?key|access_?token|access_?key|secret|password|passwd|private_?key|app_?key)", re.I
+)
+# 条目里原本没有、但允许在后台新增的字段：{条目 type: {字段: 类型}}
+ADDABLE_FIELDS = {"openai": {"extra_body": "json"}}
 
 
 def default_config_path() -> Path:
@@ -77,55 +88,150 @@ def mask_key(value) -> str:
     return f"{value[:4]}…{value[-4:]}"
 
 
-def list_llms(merged: dict) -> list:
-    items = []
-    for name, entry in (merged.get("LLM") or {}).items():
+# ---------- 字段描述与类型转换 ----------
+
+def field_kind(name: str, value):
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str) or value is None:
+        return "secret" if SECRET_FIELD.search(name) else "text"
+    if isinstance(value, list) and all(isinstance(v, (str, int, float)) for v in value):
+        return "list"
+    if isinstance(value, dict):
+        return "json"
+    return None
+
+
+def _describe_field(name, kind, value) -> dict:
+    field = {"name": name, "kind": kind}
+    if kind == "secret":
+        field["set"] = not is_placeholder(value)
+        field["hint"] = mask_key(value)
+    elif kind == "text":
+        field["value"] = "" if is_placeholder(value) else str(value)
+    elif kind == "json":
+        field["value"] = json.dumps(value or {}, ensure_ascii=False)
+    elif kind == "list":
+        field["value"] = [str(v) for v in (value or [])]
+    else:
+        field["value"] = value
+    return field
+
+
+def _editable_fields(entry: dict) -> dict:
+    """{字段: 类型}，包括允许新增的字段。"""
+    fields = {}
+    for name, value in entry.items():
+        if name == "type":
+            continue
+        kind = field_kind(name, value)
+        if kind:
+            fields[name] = kind
+    for name, kind in ADDABLE_FIELDS.get(entry.get("type"), {}).items():
+        fields.setdefault(name, kind)
+    return fields
+
+
+def describe_section(merged: dict, section: str) -> dict:
+    entries = []
+    for name, entry in (merged.get(section) or {}).items():
         if not isinstance(entry, dict):
             continue
-        item = {"name": name, "type": entry.get("type", name), "fields": {}}
-        for field in ("model_name", "base_url", "url"):
-            if field in entry:
-                item["fields"][field] = "" if is_placeholder(entry[field]) else str(entry[field])
-        if "api_key" in entry:
-            item["api_key_set"] = not is_placeholder(entry["api_key"])
-            item["api_key_hint"] = mask_key(entry["api_key"])
-        items.append(item)
-    return items
+        kinds = _editable_fields(entry)
+        entries.append(
+            {
+                "name": name,
+                "type": entry.get("type", name),
+                "fields": [_describe_field(f, k, entry.get(f)) for f, k in kinds.items()],
+                "needs_key": any(k == "secret" and is_placeholder(entry.get(f)) for f, k in kinds.items()),
+            }
+        )
+    return {"selected": (merged.get("selected_module") or {}).get(section), "entries": entries}
 
 
-def update_llm(name: str, fields: dict, merged: dict, path: Path = None) -> None:
-    """把字段写入 data/.config.yaml 的 LLM.<name>。
+def _convert(kind, raw, original):
+    if kind == "bool":
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    if kind == "number":
+        text = str(raw).strip()
+        if text == "":
+            raise ValueError("数字不能为空")
+        return int(text) if isinstance(original, int) and not isinstance(original, bool) and re.fullmatch(r"-?\d+", text) else float(text)
+    if kind == "list":
+        items = raw if isinstance(raw, list) else re.split(r"[,，\n]", str(raw))
+        return CommentedSeq([str(i).strip() for i in items if str(i).strip()])
+    if kind == "json":
+        value = raw if isinstance(raw, dict) else json.loads(str(raw).strip() or "{}")
+        if not isinstance(value, dict):
+            raise ValueError("需要 JSON 对象，例如 {\"key\": \"value\"}")
+        return value
+    return "" if raw is None else str(raw).strip()
 
-    只接受该模型在合并配置里本来就有的字段；api_key 传空表示不修改。
+
+def update_entry(section: str, name: str, payload: dict, merged: dict, path: Path = None) -> list:
+    """把字段写入 data/.config.yaml 的 <section>.<name>，返回实际修改的字段名。
+
+    字段校验失败时抛出 ValueError（带字段名），整个请求不写入。
     """
-    entry = (merged.get("LLM") or {}).get(name)
+    if section not in SECTIONS:
+        raise KeyError(section)
+    entry = (merged.get(section) or {}).get(name)
     if not isinstance(entry, dict):
         raise KeyError(name)
+    kinds = _editable_fields(entry)
     changes = {}
-    for field, value in fields.items():
-        if field not in EDITABLE_LLM_FIELDS or field not in entry:
+    for field, raw in (payload or {}).items():
+        kind = kinds.get(field)
+        if kind is None:
             continue
-        value = "" if value is None else str(value).strip()
-        if field == "api_key" and value == "":
-            continue
-        changes[field] = value
+        if kind == "secret" and (raw is None or str(raw).strip() == ""):
+            continue  # 密钥留空表示不修改
+        try:
+            value = _convert(kind, raw, entry.get(field))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"{field}: {e}")
+        original = entry.get(field)
+        if kind == "list":
+            same = [str(v) for v in (original or [])] == list(value)
+        elif kind == "text":
+            same = value == ("" if is_placeholder(original) else str(original))
+        else:
+            same = value == original and field in entry
+        if field not in entry and value in ({}, [], ""):
+            same = True  # 允许新增的字段留空时不写入
+        if not same:
+            changes[field] = value
     if not changes:
-        return
+        return []
     data = load_custom(path)
-    llm = data.setdefault("LLM", CommentedMap())
-    target = llm.setdefault(name, CommentedMap())
+    target = data.setdefault(section, CommentedMap()).setdefault(name, CommentedMap())
     for field, value in changes.items():
         target[field] = value
     save_custom(data, path)
+    return list(changes)
 
 
-def select_llm(name: str, merged: dict, path: Path = None) -> None:
-    if name not in (merged.get("LLM") or {}):
+def select_entry(section: str, name: str, merged: dict, path: Path = None) -> None:
+    if section not in SECTIONS:
+        raise KeyError(section)
+    if name not in (merged.get(section) or {}):
         raise KeyError(name)
     data = load_custom(path)
-    data.setdefault("selected_module", CommentedMap())["LLM"] = name
+    data.setdefault("selected_module", CommentedMap())[section] = name
     save_custom(data, path)
 
+
+def entry_type(merged: dict, section: str, name: str = None) -> str:
+    name = name or (merged.get("selected_module") or {}).get(section)
+    entry = (merged.get(section) or {}).get(name) or {}
+    return entry.get("type", name)
+
+
+# ---------- 管理密码 ----------
 
 def get_password_hash(path: Path = None):
     admin = load_custom(path).get("admin") or {}
