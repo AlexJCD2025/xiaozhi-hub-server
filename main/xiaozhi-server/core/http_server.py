@@ -74,6 +74,11 @@ class SimpleHttpServer:
                         ),
                     ]
                 )
+                # [xiaozhi-hub] 轻量管理后台
+                if not read_config_from_api:
+                    from core.admin import register_admin_routes
+
+                    register_admin_routes(app, self.config, getattr(self, "ws_server", None))
 
                 # 运行服务
                 runner = web.AppRunner(app)

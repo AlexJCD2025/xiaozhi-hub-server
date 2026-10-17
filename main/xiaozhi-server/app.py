@@ -73,6 +73,7 @@ async def main():
     ws_task = asyncio.create_task(ws_server.start())
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config)
+    ota_server.ws_server = ws_server  # [xiaozhi-hub] 管理后台热加载 LLM 时使用
     ota_task = asyncio.create_task(ota_server.start())
 
     read_config_from_api = config.get("read_config_from_api", False)
@@ -82,6 +83,10 @@ async def main():
             "OTA接口是\t\thttp://{}:{}/xiaozhi/ota/",
             get_local_ip(),
             port,
+        )
+        # [xiaozhi-hub] 轻量管理后台
+        logger.bind(tag=TAG).info(
+            "管理后台是\t\thttp://{}:{}/admin", get_local_ip(), port
         )
     logger.bind(tag=TAG).info(
         "视觉分析接口是\thttp://{}:{}/mcp/vision/explain",
