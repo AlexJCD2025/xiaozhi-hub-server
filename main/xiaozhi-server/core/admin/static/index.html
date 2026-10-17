@@ -83,7 +83,7 @@
   <section id="setup-remote" class="card hidden">
     <h2>尚未设置密码</h2>
     <p class="muted">为了安全，首次设置密码只能在运行服务的电脑上进行。请在那台电脑的浏览器中打开
-      <code>http://127.0.0.1:8003/admin</code>。</p>
+      <code id="local-admin-url">http://127.0.0.1/admin</code>。</p>
   </section>
 
   <section id="login" class="card hidden">
@@ -292,6 +292,7 @@ $("login-pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("log
 $("logout").onclick = async () => { await api("logout", {}); await route(); };
 document.querySelectorAll("#tabs button").forEach((b) => { b.onclick = () => openTab(b.dataset.tab); });
 
+$("local-admin-url").textContent = `http://127.0.0.1:${location.port || 80}/admin`;
 route();
 </script>
 </body>

@@ -147,12 +147,26 @@ mkdir -p "$HOME/xiaozhi-workspace"
 step "环境自检"
 "$PY" "$ROOT/scripts/doctor.py" --skip-ports 2>/dev/null || info "自检发现异常，请按上面的提示处理后再启动"
 
+HTTP_PORT="$("$PY" - "$SERVER" <<'PYEOF'
+import sys, yaml
+from pathlib import Path
+d = Path(sys.argv[1])
+port = 8003
+for f in (d / "config.yaml", d / "data" / ".config.yaml"):
+    try:
+        port = ((yaml.safe_load(f.read_text(encoding="utf-8")) or {}).get("server") or {}).get("http_port", port)
+    except Exception:
+        pass
+print(port)
+PYEOF
+)"
+
 cat <<EOF
 
 安装完成。
 
   启动服务：  bash scripts/start.sh
-  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:8003/admin 设置密码。
+  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:${HTTP_PORT}/admin 设置密码。
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。

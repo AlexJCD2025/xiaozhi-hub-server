@@ -1,6 +1,10 @@
 # xiaozhi-hub-server 本地配置（会覆盖 config.yaml 中的同名配置）
 # 由安装脚本生成。此文件不会提交到 Git，API Key 只写在这里。
-# 大模型、API Key、语音识别 / 合成等，都可以在管理后台 http://<本机IP>:8003/admin 中修改。
+# 大模型、API Key、语音识别 / 合成等，都可以在管理后台 http://<本机IP>:7788/admin 中修改。
+
+server:
+  http_port: 7788   # HTTP：OTA 接口和管理后台。设备配网时填 http://<本机IP>:7788/xiaozhi/ota/
+  port: 7789        # WebSocket：设备的语音长连接，地址由 OTA 接口自动下发
 
 selected_module:
   VAD: SileroVAD

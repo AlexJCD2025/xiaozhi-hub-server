@@ -1,4 +1,4 @@
-"""轻量管理后台：挂在 HTTP 服务（默认 :8003）的 /admin 下，读写 data/.config.yaml。"""
+"""轻量管理后台：挂在 HTTP 服务（server.http_port）的 /admin 下，读写 data/.config.yaml。"""
 
 from core.admin.admin_handler import AdminHandler
 

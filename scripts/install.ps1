@@ -117,15 +117,22 @@ Step "环境自检"
 & $Py (Join-Path $Root "scripts\doctor.py") --skip-ports
 if ($LASTEXITCODE -ne 0) { Info "自检发现异常，请按上面的提示处理后再启动" }
 
+$HttpPort = 8003; $WsPort = 8000
+foreach ($f in @((Join-Path $Server "config.yaml"), $Config)) {
+    $t = Get-Content $f -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($t -match "(?m)^\s+http_port:\s*(\d+)") { $HttpPort = $Matches[1] }
+    if ($t -match "(?m)^server:[\s\S]*?^\s+port:\s*(\d+)") { $WsPort = $Matches[1] }
+}
+
 Write-Host @"
 
 安装完成。
 
   启动服务：  powershell -ExecutionPolicy Bypass -File scripts\start.ps1
-  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:8003/admin 设置密码。
+  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:$HttpPort/admin 设置密码。
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。
-  - 请在 Windows 防火墙中放行 TCP 端口 8000 和 8003（仅限专用网络）。
+  - 请在 Windows 防火墙中放行 TCP 端口 $WsPort 和 $HttpPort（仅限专用网络）。
   - 服务只应在局域网内使用，不要暴露到公网。
 "@
