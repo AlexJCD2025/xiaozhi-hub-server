@@ -16,6 +16,8 @@ THINKING_DISABLED_DOMAINS = {
     "bigmodel.cn": {"thinking": {"type": "disabled"}},
     "moonshot.cn": {"thinking": {"type": "disabled"}},
     "volces.com": {"thinking": {"type": "disabled"}},
+    # [xiaozhi-hub] Claude 的 OpenAI 兼容接口默认会隐藏思考，首字延迟 3~6 秒且可能耗尽 max_tokens
+    "anthropic.com": {"reasoning_effort": "none"},
 }
 
 
@@ -27,7 +29,8 @@ class LLMProvider(LLMProviderBase):
             self.base_url = config.get("base_url")
         else:
             self.base_url = config.get("url")
-        
+        self.extra_body = config.get("extra_body")  # [xiaozhi-hub]
+
         timeout_config = config.get("timeout")
         if isinstance(timeout_config, dict):
             # 细粒度超时配置
@@ -88,6 +91,9 @@ class LLMProvider(LLMProviderBase):
                 request_params.setdefault("extra_body", {}).update(params)
                 logger.bind(tag=TAG).info(f"为域名 {domain} 禁用思考模式，参数: {params}")
                 break
+        # [xiaozhi-hub] 配置里的 extra_body 原样附加到请求体，例如经代理访问 Claude 时设置 reasoning_effort: none
+        if isinstance(self.extra_body, dict) and self.extra_body:
+            request_params.setdefault("extra_body", {}).update(self.extra_body)
 
     def response(self, session_id, dialogue, **kwargs):
         dialogue = self.normalize_dialogue(dialogue)
