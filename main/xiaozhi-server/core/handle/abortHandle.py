@@ -11,6 +11,9 @@ async def handleAbortMessage(conn: "ConnectionHandler"):
     # 设置成打断状态，会自动打断llm、tts任务
     conn.close_after_chat = False
     conn.client_abort = True
+    # [xiaozhi-hub] 让 LLM 立即停止当前回答（claude_cli 向 Claude Code 发送中断）
+    if callable(getattr(conn.llm, "abort", None)):
+        conn.llm.abort(conn)
     conn.clear_queues()
     # 打断客户端说话状态
     await conn.websocket.send(

@@ -1,0 +1,4 @@
+# xiaozhi-hub-server 新增依赖（在 requirements.txt 之后安装）
+# claude-agent-sdk 固定 0.1.81：更新的版本要求 mcp>=1.23，会把原项目锁定的 mcp==1.22.0
+# 升级到 2.x，导致原项目的 MCP 客户端（core/providers/tools/server_mcp）导入失败。
+claude-agent-sdk==0.1.81

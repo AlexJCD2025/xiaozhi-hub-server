@@ -1,0 +1,297 @@
+"""claude_cli：让小智设备通过本机 Claude Code（claude-agent-sdk）对话和干活。
+
+线程模型：
+- 服务端在每个连接的线程池里同步迭代 response() 生成器；
+- 本 provider 自带一个后台线程运行 asyncio 事件循环，所有 SDK 调用都在这个循环里执行；
+- 两边通过 queue.Queue 传递事件。
+
+每个设备连接最多对应一个常驻的 Claude Code 进程：首句话到来时启动（顺便决定新开还是接续），
+空闲超时、连接关闭或服务退出时结束。
+"""
+
+import asyncio
+import os
+import queue
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Optional
+
+from config.config_loader import get_project_dir
+from config.logger import setup_logging
+from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
+from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
+from core.agent.session_store import SessionStore, choose_resume
+from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, wants_resume
+from core.providers.llm.base import LLMProviderBase
+from core.utils.prompt_manager import EMOJI_List
+
+TAG = __name__
+logger = setup_logging()
+
+VOICE_RULES = f"""
+# 语音助手规则（最高优先级）
+你现在通过一个语音设备和用户对话，你说的每个字都会被朗读出来。
+1. 每次回复的第一个字符必须是一个表示心情的 emoji，并且只能从这个列表中选：{" ".join(EMOJI_List)}。列表以外的 emoji 一律不要用，回复中间和结尾也不要再出现 emoji。
+2. 回答要简短口语化，一般不超过 3 句话。
+3. 不要使用 Markdown、列表、编号、代码块、链接、表格等任何格式符号。
+4. 需要调用工具时，调用前最多说一句过渡语；完成后用一两句话汇报结果，不要念出代码、命令、路径细节和文件内容。
+5. 用户没问时，不要主动解释自己有哪些工具、权限或限制。
+"""
+
+COMMON_CLI_PATHS = [
+    "~/.claude/local/claude",
+    "~/.local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+]
+
+
+def find_claude_cli(configured: Optional[str] = None) -> Optional[str]:
+    """优先用配置的路径，其次 PATH，再其次常见安装位置（从图形界面启动时 PATH 可能不完整）。"""
+    if configured:
+        p = Path(os.path.expanduser(configured))
+        return str(p) if p.exists() else None
+    names = ["claude.exe", "claude"] if sys.platform == "win32" else ["claude"]
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    for candidate in COMMON_CLI_PATHS:
+        p = Path(os.path.expanduser(candidate))
+        if p.exists():
+            return str(p)
+    return None
+
+
+@dataclass
+class ConnState:
+    key: str  # 设备 ID；没有时退回连接的 session_id
+    conn: object = None
+    agent: Optional[ClaudeSession] = None
+    lock: Optional[asyncio.Lock] = None
+    idle_handle: Optional[asyncio.TimerHandle] = None
+    intent_warned: bool = False
+    extra: dict = field(default_factory=dict)
+
+
+class LLMProvider(LLMProviderBase):
+    def __init__(self, config: dict):
+        self.model_name = f"claude_cli:{config.get('model') or 'default'}"
+        self.cli_path = find_claude_cli(config.get("cli_path"))
+        workdir = Path(os.path.expanduser(config.get("workdir") or "~/xiaozhi-workspace"))
+        workdir.mkdir(parents=True, exist_ok=True)
+        self.session_config = ClaudeSessionConfig(
+            cli_path=self.cli_path,
+            model=config.get("model") or None,
+            workdir=str(workdir),
+            allowed_tools=list(config.get("allowed_tools") or ["Read", "Grep", "Glob"]),
+            permission_mode=config.get("permission_mode") or "default",
+        )
+        self.turn_timeout = float(config.get("turn_timeout_seconds") or 120)
+        self.idle_timeout = float(config.get("idle_timeout_seconds") or 300)
+        self.resume_window = float(config.get("resume_window_minutes") or 120)
+        self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
+        self.filler = config.get("first_reply_filler", "好的，我看一下")
+        self.filler_delay = float(config.get("filler_delay_seconds") or 2)
+        self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
+
+        self._states: Dict[str, ConnState] = {}
+        self._states_lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, name="claude-cli-loop", daemon=True)
+        self._thread.start()
+        self._self_check()
+
+    # ---------- 启动自检 ----------
+
+    def _self_check(self) -> None:
+        if not self.cli_path:
+            logger.bind(tag=TAG).error("未找到 claude 命令，请先安装 Claude Code 并登录，或在配置中指定 cli_path")
+            return
+        try:
+            out = subprocess.run([self.cli_path, "--version"], capture_output=True, text=True,
+                                 encoding="utf-8", timeout=15)
+            logger.bind(tag=TAG).info(
+                f"Claude Code: {out.stdout.strip() or out.stderr.strip()} ({self.cli_path})，"
+                f"工作目录 {self.session_config.workdir}，允许工具 {self.session_config.allowed_tools}"
+            )
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"无法运行 {self.cli_path} --version: {e}")
+
+    # ---------- 连接钩子（由原项目代码通过 getattr 调用） ----------
+
+    def _state(self, session_id: str) -> ConnState:
+        with self._states_lock:
+            st = self._states.get(session_id)
+            if st is None:
+                st = ConnState(key=session_id)
+                self._states[session_id] = st
+            return st
+
+    def on_conn_open(self, conn) -> None:
+        st = self._state(conn.session_id)
+        st.conn = conn
+        if getattr(conn, "device_id", None):
+            st.key = conn.device_id
+
+    def abort(self, conn) -> None:
+        st = self._states.get(conn.session_id)
+        if st and st.agent:
+            asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+
+    def on_conn_close(self, conn) -> None:
+        with self._states_lock:
+            st = self._states.pop(conn.session_id, None)
+        if st:
+            asyncio.run_coroutine_threadsafe(self._close_agent(st, "连接关闭"), self._loop)
+
+    # ---------- 后台循环中的逻辑 ----------
+
+    async def _close_agent(self, st: ConnState, reason: str) -> None:
+        if st.idle_handle:
+            st.idle_handle.cancel()
+            st.idle_handle = None
+        agent, st.agent = st.agent, None
+        if agent:
+            await agent.close()
+            logger.bind(tag=TAG).info(f"已关闭 Claude Code 进程（{reason}），设备 {st.key}")
+
+    def _schedule_idle_close(self, st: ConnState) -> None:
+        if st.idle_handle:
+            st.idle_handle.cancel()
+        st.idle_handle = self._loop.call_later(
+            self.idle_timeout,
+            lambda: asyncio.ensure_future(self._close_agent(st, f"空闲 {int(self.idle_timeout)} 秒")),
+        )
+
+    async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
+        """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。"""
+        if st.agent and st.agent.alive:
+            return False
+        keyword = wants_resume(text, self.resume_keywords)
+        resume_id, reason = choose_resume(self.store.get(st.key), keyword, self.resume_window)
+        cfg = ClaudeSessionConfig(**{**self.session_config.__dict__,
+                                     "system_prompt_append": (system_prompt or "") + "\n" + VOICE_RULES})
+        agent = ClaudeSession(cfg, resume_id=resume_id, logger=logger.bind(tag=TAG))
+        t0 = time.time()
+        try:
+            await agent.start()
+        except AgentSessionError as e:
+            if e.kind != ErrorKind.SESSION_MISSING:
+                raise
+            logger.bind(tag=TAG).warning(f"接续会话 {resume_id} 失败，改为新开会话")
+            self.store.forget(st.key)
+            if keyword:
+                out.put(TextDelta("😶没有找到之前的对话，我们重新开始吧。"))
+            agent = ClaudeSession(cfg, logger=logger.bind(tag=TAG))
+            await agent.start()
+            resume_id, reason = None, "resume_failed"
+        st.agent = agent
+        logger.bind(tag=TAG).info(
+            f"Claude Code 进程已启动（{time.time() - t0:.1f}s），设备 {st.key}，"
+            f"{'接续会话 ' + resume_id if resume_id else '新会话 ' + agent.session_id}（{reason}）"
+        )
+        if keyword:
+            if resume_id:
+                out.put(TextDelta("😉好的，我们接着上次聊。"))
+            elif reason == "no_record":
+                out.put(TextDelta("😶没有找到之前的对话，我们重新开始吧。"))
+            out.put(Done(session_id=agent.session_id))
+            return True
+        return False
+
+    async def _run_turn(self, st: ConnState, text: str, system_prompt: str, out: queue.Queue) -> None:
+        if st.lock is None:
+            st.lock = asyncio.Lock()
+        async with st.lock:
+            if st.idle_handle:
+                st.idle_handle.cancel()
+            try:
+                if await self._ensure_agent(st, text, out, system_prompt):
+                    self.store.touch(st.key, st.agent.session_id)
+                    return
+                async for ev in st.agent.send(text):
+                    out.put(ev)
+                    if isinstance(ev, Error) and ev.kind == ErrorKind.PROCESS_EXITED:
+                        st.agent = None
+                if st.agent:
+                    self.store.touch(st.key, st.agent.session_id)
+            except AgentSessionError as e:
+                out.put(Error(e.kind, e.detail))
+            except Exception as e:
+                logger.bind(tag=TAG).exception(f"Claude Code 处理出错: {e}")
+                out.put(Error(ErrorKind.UNKNOWN, str(e)))
+            finally:
+                if st.agent:
+                    self._schedule_idle_close(st)
+
+    # ---------- 服务端调用的同步接口 ----------
+
+    def response(self, session_id, dialogue, **kwargs):
+        text = next((m.get("content") for m in reversed(dialogue) if m.get("role") == "user"), "") or ""
+        system_prompt = dialogue[0].get("content", "") if dialogue and dialogue[0].get("role") == "system" else ""
+        st = self._state(session_id)
+        self._warn_intent(st)
+
+        out: queue.Queue = queue.Queue()
+        asyncio.run_coroutine_threadsafe(self._run_turn(st, text, system_prompt, out), self._loop)
+
+        t0 = time.time()
+        first_at = None
+        filler_sent = False
+        finished = False
+        try:
+            while True:
+                try:
+                    ev = out.get(timeout=0.2)
+                except queue.Empty:
+                    elapsed = time.time() - t0
+                    if first_at is None and self.filler and not filler_sent and elapsed >= self.filler_delay:
+                        filler_sent = True
+                        yield f"😶{self.filler}。"
+                    if elapsed >= self.turn_timeout:
+                        logger.bind(tag=TAG).warning(f"本轮超过 {int(self.turn_timeout)} 秒，已中断")
+                        if st.agent:
+                            asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+                        yield Error(ErrorKind.TIMEOUT).voice_message
+                        finished = True
+                        return
+                    continue
+                if isinstance(ev, TextDelta):
+                    if first_at is None:
+                        first_at = time.time() - t0
+                    yield ev.text
+                elif isinstance(ev, Error):
+                    logger.bind(tag=TAG).error(f"Claude Code 错误 [{ev.kind.value}]: {ev.detail[:500]}")
+                    prefix = "" if (first_at is not None or filler_sent) else "😶"
+                    yield prefix + ev.voice_message
+                    finished = True
+                    return
+                elif isinstance(ev, Done):
+                    finished = True
+                    logger.bind(tag=TAG).info(
+                        f"Claude Code 本轮完成：首字 {first_at if first_at is None else round(first_at, 2)}s，"
+                        f"总耗时 {time.time() - t0:.1f}s{'，已被打断' if ev.interrupted else ''}"
+                    )
+                    return
+        finally:
+            if not finished and st.agent:
+                # 生成器被提前关闭（例如设备打断后服务端停止迭代），让 Claude 也停下来
+                asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+
+    def response_no_stream(self, system_prompt, user_prompt, **kwargs):
+        logger.bind(tag=TAG).warning("claude_cli 不支持非流式调用（意图识别、记忆总结等），请为这些模块单独配置 API 模型")
+        return ""
+
+    def _warn_intent(self, st: ConnState) -> None:
+        if st.intent_warned or st.conn is None:
+            return
+        intent_type = getattr(st.conn, "intent_type", None)
+        if intent_type and intent_type != "nointent":
+            logger.bind(tag=TAG).warning(f"使用 claude_cli 时 Intent 应设为 nointent，当前为 {intent_type}")
+        st.intent_warned = True
