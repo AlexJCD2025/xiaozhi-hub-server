@@ -56,7 +56,3 @@ def match_resume(text: str, keywords=None):
             if sum(a != b for a, b in zip(window, k)) <= 1 and not _negated(core, start):
                 return _remainder(core, start, start + len(k))
     return None
-
-
-def wants_resume(text: str, keywords=None) -> bool:
-    return match_resume(text, keywords) is not None

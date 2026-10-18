@@ -106,22 +106,6 @@ def field_kind(name: str, value):
     return None
 
 
-def _describe_field(name, kind, value) -> dict:
-    field = {"name": name, "kind": kind}
-    if kind == "secret":
-        field["set"] = not is_placeholder(value)
-        field["hint"] = mask_key(value)
-    elif kind == "text":
-        field["value"] = "" if is_placeholder(value) else str(value)
-    elif kind == "json":
-        field["value"] = json.dumps(value or {}, ensure_ascii=False)
-    elif kind == "list":
-        field["value"] = [str(v) for v in (value or [])]
-    else:
-        field["value"] = value
-    return field
-
-
 def _editable_fields(entry: dict) -> dict:
     """{字段: 类型}，包括允许新增的字段。"""
     fields = {}
@@ -134,23 +118,6 @@ def _editable_fields(entry: dict) -> dict:
     for name, kind in ADDABLE_FIELDS.get(entry.get("type"), {}).items():
         fields.setdefault(name, kind)
     return fields
-
-
-def describe_section(merged: dict, section: str) -> dict:
-    entries = []
-    for name, entry in (merged.get(section) or {}).items():
-        if not isinstance(entry, dict):
-            continue
-        kinds = _editable_fields(entry)
-        entries.append(
-            {
-                "name": name,
-                "type": entry.get("type", name),
-                "fields": [_describe_field(f, k, entry.get(f)) for f, k in kinds.items()],
-                "needs_key": any(k == "secret" and is_placeholder(entry.get(f)) for f, k in kinds.items()),
-            }
-        )
-    return {"selected": (merged.get("selected_module") or {}).get(section), "entries": entries}
 
 
 def _convert(kind, raw, original):

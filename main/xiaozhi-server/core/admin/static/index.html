@@ -440,7 +440,7 @@ async function renderStatus(root) {
       <div class="k">${MODULE_TITLES[k]}</div><div class="v">${esc(value)}</div>
       <div class="d">${m.running && m.running !== m.selected ? `<span class="pill warn">运行中仍是 ${esc(m.running)}</span>` : esc(detail)}</div></button>`;
   }).join("");
-  const addr = [["本机 IP", s.addresses.ip], ["OTA 地址", s.addresses.ota], ["WebSocket", s.addresses.websocket], ["管理后台", s.addresses.admin]];
+  const addr = [["本机 IP", s.addresses.ip], ["OTA 地址", s.addresses.ota], ["管理后台", s.addresses.admin]];
   const levelPill = { ok: '<span class="pill ok">正常</span>', warn: '<span class="pill warn">注意</span>', error: '<span class="pill err">异常</span>' };
   const bad = s.checks.filter((c) => c.level !== "ok").length;
   root.innerHTML = `

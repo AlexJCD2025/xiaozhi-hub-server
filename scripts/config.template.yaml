@@ -1,6 +1,6 @@
 # xiaozhi-hub-server 本地配置（会覆盖 config.yaml 中的同名配置）
 # 由安装脚本生成。此文件不会提交到 Git，API Key 只写在这里。
-# 大模型、API Key、语音识别 / 合成等，都可以在管理后台 http://<本机IP>:16688/admin 中修改。
+# 大模型、API Key、语音合成音色等，可以在管理后台 http://<本机IP>:16688/admin 中修改。
 
 server:
   http_port: 16688  # HTTP：OTA 接口和管理后台。设备配网时填 http://<本机IP>:16688/xiaozhi/ota/
@@ -12,7 +12,7 @@ tts_audio_prebuffer_count: 15
 
 selected_module:
   VAD: SileroVAD
-  ASR: SherpaASR          # 语音识别。SherpaASR 不需要 torch；FunASR 需要完整安装（install.sh --full）
+  ASR: SherpaASR          # 语音识别：本地 SenseVoice（sherpa-onnx），不需要联网
   LLM: ClaudeCLI          # 安装时根据是否找到 Claude Code 自动选择
   TTS: EdgeTTS
   Memory: nomem
@@ -44,4 +44,4 @@ LLM:
     api_key: 你的Claude API Key
     max_tokens: 500
     # 直连 api.anthropic.com 时会自动关闭思考；经第三方代理访问时，如果首字很慢或没有回复，
-    # 可在管理后台为这一项添加 extra_body，例如 {"reasoning_effort": "none"}
+    # 可在本文件里为这一项添加 extra_body，例如 extra_body: {"reasoning_effort": "none"}

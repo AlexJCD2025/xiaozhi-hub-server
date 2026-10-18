@@ -34,7 +34,6 @@ def collect_status(config: dict, merged: dict) -> dict:
     ip = get_local_ip()
     server = config.get("server", {})
     http_port = int(server.get("http_port", 8003))
-    ws_port = int(server.get("port", 8000))
     selected = dict(merged.get("selected_module") or {})
     running = dict(config.get("selected_module") or {})
 
@@ -51,8 +50,8 @@ def collect_status(config: dict, merged: dict) -> dict:
         opus_ok, opus = False, f"{opus or ''} 加载失败: {e}"
     checks.append(_check("opus", opus_ok, opus or "已加载"))
 
-    # 所选模块需要的 Python 包（精简安装时，部分模块的依赖没有安装）。
-    # 后台不管理的 VAD、Memory、VLLM 也要查：手动改了配置时，服务会在启动时才报错
+    # 所选模块需要的 Python 包：同步上游后默认模块新增了依赖、或手动改配置选了其他模块时，
+    # 精简安装可能缺包。后台不管理的 VAD、Memory、VLLM 也要查，否则服务会在启动时才报错
     lacking = []
     for section in (*config_store.SECTIONS, "VAD", "Memory", "VLLM"):
         name = selected.get(section)
@@ -60,9 +59,9 @@ def collect_status(config: dict, merged: dict) -> dict:
         if missing:
             lacking.append(f"{name} 缺少 {', '.join(missing)}")
     checks.append(_check("模块依赖", not lacking,
-                         "；".join(lacking) + "。请用完整安装（install.sh --full）" if lacking else "所选模块的依赖均已安装"))
+                         "；".join(lacking) + "。请重新运行安装脚本补装依赖" if lacking else "所选模块的依赖均已安装"))
 
-    # 语音识别模型（检查本地模型文件：FunASR 和 sherpa-onnx）
+    # 语音识别模型（检查本地模型文件）
     model_check = pages.asr_model_check((merged.get("ASR") or {}).get(selected.get("ASR"), {}))
     if model_check:
         checks.append(_check("语音识别模型", model_check["ok"], model_check["detail"]))
@@ -91,16 +90,13 @@ def collect_status(config: dict, merged: dict) -> dict:
             checks.append(_check("意图识别", False, "Claude 在 function_call 模式下表情和回复长度都有问题，建议用 nointent",
                                  level="warn"))
 
-    pending = {k: v for k, v in selected.items() if running.get(k) != v and k in config_store.SECTIONS}
     return {
         "addresses": {
             "ip": ip,
             "ota": f"http://{ip}:{http_port}/xiaozhi/ota/",
-            "websocket": f"ws://{ip}:{ws_port}/xiaozhi/v1/",
             "admin": f"http://{ip}:{http_port}/admin",
         },
         "modules": {k: {"selected": selected.get(k), "type": config_store.entry_type(merged, k),
                         "running": running.get(k)} for k in config_store.SECTIONS},
-        "pending": pending,
         "checks": checks,
     }

@@ -36,26 +36,11 @@ def merged(cfg_path):
 
 # ---------- config_store ----------
 
-def entry(section, name, path):
-    return next(e for e in config_store.describe_section(merged(path), section)["entries"] if e["name"] == name)
-
-
-def field(e, name):
-    return next(f for f in e["fields"] if f["name"] == name)
-
-
-def test_describe_masks_secret_and_flags_placeholder(cfg_path):
-    e = entry("LLM", "ClaudeAPI", cfg_path)
-    key = field(e, "api_key")
-    assert key["kind"] == "secret" and key["set"] is False and "value" not in key
-    assert e["needs_key"] is True
-    assert field(e, "model_name") == {"name": "model_name", "kind": "text", "value": "claude-haiku-5-5"}
-    assert field(e, "extra_body")["kind"] == "json"  # openai 类型允许新增 extra_body
+def test_field_kind_detects_secrets():
     # max_tokens 之类的字段不能被误判成密钥
     assert config_store.field_kind("max_tokens", 500) == "number"
     assert config_store.field_kind("access_token", "x") == "secret"
     assert config_store.field_kind("token", "x") == "secret"
-    assert "ChatGLMLLM" in [x["name"] for x in config_store.describe_section(merged(cfg_path), "LLM")["entries"]]
 
 
 def test_update_writes_key_and_keeps_comments(cfg_path):
@@ -64,8 +49,7 @@ def test_update_writes_key_and_keeps_comments(cfg_path):
     text = cfg_path.read_text(encoding="utf-8")
     assert "sk-ant-1234567890abcdef" in text
     assert "# 用户注释应被保留" in text and "# 行尾注释" in text
-    key = field(entry("LLM", "ClaudeAPI", cfg_path), "api_key")
-    assert key["set"] is True and key["hint"] == "sk-a…cdef"
+    assert config_store.mask_key(merged(cfg_path)["LLM"]["ClaudeAPI"]["api_key"]) == "sk-a…cdef"
 
 
 def test_update_empty_secret_means_unchanged(cfg_path):
@@ -167,29 +151,18 @@ async def test_setup_login_and_update_flow(client, cfg_path):
     r = await client.post("/admin/api/setup", json={"password": "another-pass"})
     assert r.status == 409
 
-    r = await client.post("/admin/api/modules/LLM/entries/ClaudeAPI", json={"api_key": "sk-ant-abcdefghijklmnop"})
-    assert r.status == 200 and (await r.json())["changed"] == ["api_key"]
-    data = await (await client.get("/admin/api/modules/LLM")).json()
-    item = next(i for i in data["entries"] if i["name"] == "ClaudeAPI")
-    assert next(f for f in item["fields"] if f["name"] == "api_key")["set"] is True
-    assert "sk-ant-abcdefghijklmnop" not in str(data)  # 完整 Key 不回传
-
-    r = await client.post("/admin/api/modules/LLM/entries/ClaudeAPI", json={"extra_body": "not json"})
-    assert r.status == 400
-    r = await client.post("/admin/api/modules/TTS/select", json={"name": "EdgeTTS"})
-    assert r.status == 200 and (await r.json())["note"]
-    assert (await client.get("/admin/api/modules/VAD")).status == 404
+    assert (await client.get("/admin/api/llm")).status == 200
 
     await client.post("/admin/api/logout", json={})
-    assert (await client.get("/admin/api/modules/LLM")).status == 401
+    assert (await client.get("/admin/api/llm")).status == 401
     assert (await client.post("/admin/api/login", json={"password": "pass-1234"})).status == 200
-    assert (await client.get("/admin/api/modules/LLM")).status == 200
+    assert (await client.get("/admin/api/llm")).status == 200
 
 
 async def test_requires_login_and_json(client):
-    assert (await client.get("/admin/api/modules/LLM")).status == 401
+    assert (await client.get("/admin/api/llm")).status == 401
     assert (await client.get("/admin/api/status")).status == 401
-    assert (await client.post("/admin/api/modules/LLM/select", json={"name": "ChatGLMLLM"})).status == 401
+    assert (await client.post("/admin/api/llm/use", json={"vendor": "glm"})).status == 401
     r = await client.post("/admin/api/setup", data="password=pass-1234",
                           headers={"Content-Type": "application/x-www-form-urlencoded"})
     assert r.status == 415
@@ -251,7 +224,7 @@ async def test_devices_and_emotion_test(client):
         assert devices[0]["device_id"] == "dev-1"
         r = await client.post("/admin/api/devices/s-1/emotion-test", json={"interval": 0.5})
         data = await r.json()
-        assert r.status == 200 and len(data["sequence"]) == 21
+        assert r.status == 200 and data["total"] == 21
         import asyncio
         for _ in range(200):  # conftest 让 asyncio.sleep 立即返回，后台任务几轮调度即可发完
             if len(sent) == 21:
@@ -389,21 +362,6 @@ def test_missing_packages_real_providers(monkeypatch):
         assert deps.missing_packages("ASR", "no_such_provider") == ()  # 找不到源文件交给原项目报错
     finally:
         clear_deps_cache(deps)
-
-
-async def test_select_refuses_module_without_packages(client, cfg_path, monkeypatch):
-    from core.admin import deps
-
-    monkeypatch.setattr(deps, "missing_packages",
-                        lambda section, type_: ("funasr",) if type_ == "fun_local" else ())
-    await client.post("/admin/api/setup", json={"password": "pass-1234"})
-    data = await (await client.get("/admin/api/modules/ASR")).json()
-    entries = {e["name"]: e for e in data["entries"]}
-    assert entries["FunASR"]["missing"] == ["funasr"] and entries["SherpaASR"]["missing"] == []
-
-    r = await client.post("/admin/api/modules/ASR/select", json={"name": "FunASR"})
-    assert r.status == 400 and "funasr" in (await r.json())["error"]
-    assert "ASR" not in config_store.load_custom(cfg_path)["selected_module"]  # 没有写入配置
 
 
 def test_status_checks_module_packages_and_sherpa_model(tmp_path, monkeypatch):

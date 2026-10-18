@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = ROOT / "main" / "xiaozhi-server"
-# 精简安装和完整安装都必须有的包；FunASR 等可选模块的依赖由"模块依赖"一项按所选模块检查
+# 默认组合必须有的包；所选模块的其他依赖由"模块依赖"一项按所选模块检查
 CORE_MODULES = ["opuslib_next", "onnxruntime", "sherpa_onnx", "edge_tts", "openai", "websockets",
                 "aiohttp", "ruamel.yaml", "loguru"]
 ICON = {"ok": "✅", "warn": "⚠️ ", "error": "❌"}

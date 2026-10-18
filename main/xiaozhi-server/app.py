@@ -88,7 +88,8 @@ async def main():
         logger.bind(tag=TAG).info(
             "管理后台是\t\thttp://{}:{}/admin", get_local_ip(), port
         )
-    logger.bind(tag=TAG).info(
+    # [xiaozhi-hub] 启动时只显示 OTA 和管理后台地址，其余地址和上游提示降为 debug
+    logger.bind(tag=TAG).debug(
         "视觉分析接口是\thttp://{}:{}/mcp/vision/explain",
         get_local_ip(),
         port,
@@ -111,19 +112,19 @@ async def main():
     if isinstance(server_config, dict):
         websocket_port = int(server_config.get("port", 8000))
 
-    logger.bind(tag=TAG).info(
+    logger.bind(tag=TAG).debug(
         "Websocket地址是\tws://{}:{}/xiaozhi/v1/",
         get_local_ip(),
         websocket_port,
     )
 
-    logger.bind(tag=TAG).info(
+    logger.bind(tag=TAG).debug(
         "=======上面的地址是websocket协议地址，请勿用浏览器访问======="
     )
-    logger.bind(tag=TAG).info(
+    logger.bind(tag=TAG).debug(
         "如想测试websocket请启动digital-human模块，打开浏览器交互测试"
     )
-    logger.bind(tag=TAG).info(
+    logger.bind(tag=TAG).debug(
         "=============================================================\n"
     )
 

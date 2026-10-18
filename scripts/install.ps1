@@ -1,10 +1,8 @@
 # xiaozhi-hub-server 一键安装（Windows PowerShell）
 # ⚠️ 未实测：本脚本按 macOS 上实测过的 install.sh 逐步对照编写，尚未在 Windows 上运行验证。
-# 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-Full]
-#   默认精简安装：不装 torch、FunASR 等，语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
-#   -Full        完整安装原项目全部依赖，并额外下载 FunASR 的模型（约 900MB）
+# 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+#   只装默认组合需要的依赖（不含 torch），语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
 # 可选环境变量：$env:UV_INDEX_URL（Python 包镜像），$env:ASSUME_YES = "1"（非交互）
-param([switch]$Full)
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -14,9 +12,6 @@ $Py = Join-Path $Venv "Scripts\python.exe"
 # 默认的语音识别模型：sherpa-onnx 版 SenseVoice（int8），目录与原项目 config.yaml 中 SherpaASR 的 model_dir 一致
 $SherpaDir = Join-Path $Server "models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 $SherpaUrl = "https://modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master"
-# 完整安装时额外下载：FunASR 使用的 SenseVoiceSmall
-$FunasrModel = Join-Path $Server "models\SenseVoiceSmall\model.pt"
-$FunasrUrl = "https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt"
 $Config = Join-Path $Server "data\.config.yaml"
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -75,13 +70,8 @@ if ((Test-Path $Py) -and ((& $Py -c "import sys; print(sys.version_info[:2] == (
 } else { uv venv --python 3.10 $Venv }
 
 # ---------- 4. Python 依赖 ----------
-if ($Full) {
-    Step "安装 Python 依赖（完整安装，首次较慢，torch 等体积较大）"
-    & $Py (Join-Path $Root "scripts\install_deps.py") --python $Py --full
-} else {
-    Step "安装 Python 依赖（精简安装）"
-    & $Py (Join-Path $Root "scripts\install_deps.py") --python $Py
-}
+Step "安装 Python 依赖"
+& $Py (Join-Path $Root "scripts\install_deps.py") --python $Py
 if ($LASTEXITCODE -ne 0) { Fail "Python 依赖安装失败" }
 
 # ---------- 5. opus ----------
@@ -99,10 +89,6 @@ else {
 Step "下载语音识别模型 SenseVoice（sherpa-onnx int8 版，约 240MB）"
 Download "$SherpaUrl/model.int8.onnx" (Join-Path $SherpaDir "model.int8.onnx") 200000000
 Download "$SherpaUrl/tokens.txt" (Join-Path $SherpaDir "tokens.txt") 100000
-if ($Full) {
-    Step "下载 FunASR 语音识别模型 SenseVoiceSmall（约 900MB，完整安装才需要）"
-    Download $FunasrUrl $FunasrModel 900000000
-}
 
 # ---------- 7. 配置文件 ----------
 Step "生成配置文件"
@@ -122,22 +108,14 @@ else {
     Info "已生成：$Config"
 }
 
-# 精简安装没有 FunASR：之前完整安装时选了 FunASR 的配置，切换到 SherpaASR（同一个 SenseVoice 模型）
-if (-not $Full) {
-    Push-Location $Server
-    $asrType = & $Py -c "from core.admin import config_store; print(config_store.entry_type(config_store.load_merged(), 'ASR'))" 2>$null
-    & $Py -c "import importlib.util as u, sys; sys.exit(0 if u.find_spec('funasr') else 1)" 2>$null
-    $hasFunasr = ($LASTEXITCODE -eq 0)
-    if ($asrType -eq "fun_local" -and $hasFunasr) {
-        Info "当前语音识别是 FunASR（仍可使用）。改用 SherpaASR 识别准确率相当、内存约减半，可在管理后台的「语音识别」页切换"
-    } elseif ($asrType -eq "fun_local") {
-        if (Ask "当前配置的语音识别是 FunASR，但精简安装没有安装它。切换到 SherpaASR（同一个 SenseVoice 模型）？" "Y") {
-            & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaASR', config_store.load_merged())" 2>$null
-            if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaASR" } else { Info "切换失败，请在管理后台的「语音识别」页切换" }
-        } else { Info "保持 FunASR。需要它时请用完整安装：scripts\install.ps1 -Full" }
-    }
-    Pop-Location
+# 旧配置里语音识别是 FunASR 时（本项目不再安装它），切换到 SherpaASR（同一个 SenseVoice 模型）
+Push-Location $Server
+$asrType = & $Py -c "from core.admin import config_store; print(config_store.entry_type(config_store.load_merged(), 'ASR'))" 2>$null
+if ($asrType -eq "fun_local" -and (Ask "当前配置的语音识别是 FunASR，本项目不再安装它。切换到 SherpaASR（同一个 SenseVoice 模型）？" "Y")) {
+    & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaASR', config_store.load_merged())" 2>$null
+    if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaASR" } else { Info "切换失败，请手动把 data\.config.yaml 里的 selected_module.ASR 改成 SherpaASR" }
 }
+Pop-Location
 
 # ---------- 8. Claude Code ----------
 Step "检查 Claude Code"
