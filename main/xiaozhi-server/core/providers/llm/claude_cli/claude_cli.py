@@ -228,6 +228,8 @@ class LLMProvider(LLMProviderBase):
         st = self._states.get(conn.session_id)
         if st and st.agent:
             asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+            # 卡在工具调用里时 interrupt 可能无效，兜底防止下一句话一直排队等这一轮
+            asyncio.run_coroutine_threadsafe(self._abandon_if_stuck(st, st.turn_gen), self._loop)
 
     def on_conn_close(self, conn) -> None:
         with self._states_lock:
@@ -264,7 +266,7 @@ class LLMProvider(LLMProviderBase):
             await self._close_agent(st, f"空闲 {int(self.idle_timeout)} 秒")
 
     async def _abandon_if_stuck(self, st: ConnState, gen: int, grace: float = 5) -> None:
-        """超时后已发送中断；如果这一轮过了 grace 秒还没结束，说明 Claude Code 卡死了，直接结束进程。
+        """超时或设备打断后已发送中断；如果这一轮过了 grace 秒还没结束，说明 Claude Code 卡死了，直接结束进程。
         下一轮会自动重新启动进程（在接续窗口内会接续原会话）。"""
         await asyncio.sleep(grace)
         if st.turn_gen == gen and st.lock is not None and st.lock.locked() and st.agent:
