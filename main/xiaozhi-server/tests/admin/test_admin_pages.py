@@ -292,20 +292,61 @@ async def test_emotion_single_and_stop(client):
 
 def test_describe_call_names_defaults(cfg_path):
     d = pages.describe_call_names(merged(cfg_path))
-    assert d["enabled"] is True and d["target"] == "Claude" and "cloud" in d["aliases"]
-    assert d["aliases"] == d["default_aliases"]
+    assert d["enabled"] is True and d["default"] == "ClaudeCLI"
+    assert [m["entry"] for m in d["models"]] == ["ClaudeCLI"] and "cloud" in d["models"][0]["aliases"]
+    assert d["models"][0]["ready"] is True
+    assert [t["entry"] for t in d["targets"]] == ["ClaudeCLI"]  # API 厂商都还没填 Key，不能选
+
+
+def _configure_deepseek(path):
+    pages.save_vendor("deepseek", {"base_url": "https://api.deepseek.com", "api_key": "sk-1234567890abcdef",
+                                   "model": "deepseek-chat"}, merged(path), path)
+
+
+def test_describe_call_names_legacy_key_and_targets(cfg_path):
+    with config_store.edit_custom(cfg_path) as data:
+        data["call_names"] = {"models": {"claude": ["cloud"]}}  # 第一期的写法
+    _configure_deepseek(cfg_path)
+    d = pages.describe_call_names(merged(cfg_path))
+    assert [(m["entry"], m["aliases"]) for m in d["models"]] == [("ClaudeCLI", ["cloud"])]
+    assert {t["entry"]: t["suggest"] for t in d["targets"]}["DeepSeekLLM"] == ["deepseek"]
 
 
 def test_save_call_names_validates_and_writes(cfg_path):
-    changed = pages.save_call_names({"aliases": ["Cloud", "克劳德", "cloud", " "], "reply": "在呢"}, merged(cfg_path), cfg_path)
-    assert set(changed) == {"aliases", "reply"}
+    _configure_deepseek(cfg_path)
+    payload = {"reply": "在呢", "models": [{"entry": "ClaudeCLI", "aliases": ["Cloud", "克劳德", "cloud", " "]},
+                                          {"entry": "DeepSeekLLM", "aliases": ["深度求索"]}]}
+    changed = pages.save_call_names(payload, merged(cfg_path), cfg_path)
+    assert set(changed) == {"models", "reply"}
     d = pages.describe_call_names(merged(cfg_path))
-    assert d["aliases"] == ["cloud", "克劳德"] and d["reply"] == "在呢"  # 去重、去空、转小写
-    assert pages.save_call_names({"aliases": ["cloud", "克劳德"], "reply": "在呢"}, merged(cfg_path), cfg_path) == []
-    for bad, msg in ((["cloud code"], "空格或标点"), (["c"], "2 到 20"), (["hi"], "招呼语"), ([], "至少")):
+    assert [(m["entry"], m["aliases"]) for m in d["models"]] == [("ClaudeCLI", ["cloud", "克劳德"]),
+                                                                ("DeepSeekLLM", ["深度求索"])]  # 去重、去空、转小写
+    assert d["reply"] == "在呢"
+    assert pages.save_call_names(payload, merged(cfg_path), cfg_path) == []
+
+    def models(*items):
+        return {"models": [{"entry": e, "aliases": a} for e, a in items]}
+
+    for bad, msg in ((models(("ClaudeCLI", ["cloud code"])), "空格或标点"), (models(("ClaudeCLI", ["c"])), "2 到 20"),
+                     (models(("ClaudeCLI", ["hi"])), "招呼语"), (models(("ClaudeCLI", [])), "至少要有一个称呼"),
+                     (models(), "至少要给一个模型"), (models(("KimiLLM", ["kimi"])), "还没配置好"),
+                     (models(("ClaudeCLI", ["cloud"]), ("DeepSeekLLM", ["cloud"])), "只能给一个模型"),
+                     (models(("ClaudeCLI", ["cloud"]), ("ClaudeCLI", ["claude"])), "重复")):
         with pytest.raises(ValueError, match=msg):
-            pages.save_call_names({"aliases": bad}, merged(cfg_path), cfg_path)
-    assert pages.save_call_names({"aliases": [], "enabled": False}, merged(cfg_path), cfg_path)  # 关闭时可以不留称呼
+            pages.save_call_names(bad, merged(cfg_path), cfg_path)
+    assert pages.save_call_names({"models": [], "enabled": False}, merged(cfg_path), cfg_path)  # 关闭时可以不留称呼
+
+
+def test_save_call_names_keeps_model_no_longer_configured(cfg_path):
+    _configure_deepseek(cfg_path)
+    pages.save_call_names({"models": [{"entry": "DeepSeekLLM", "aliases": ["deepseek"]}]}, merged(cfg_path), cfg_path)
+    with config_store.edit_custom(cfg_path) as data:
+        data["LLM"]["DeepSeekLLM"]["api_key"] = "你的key"  # 之后 Key 被清掉了
+    d = pages.describe_call_names(merged(cfg_path))
+    assert d["models"][0]["ready"] is False
+    # 原来就有的可以保留，只改称呼也能保存
+    assert pages.save_call_names({"models": [{"entry": "DeepSeekLLM", "aliases": ["deepseek", "深度"]}]},
+                                 merged(cfg_path), cfg_path) == ["models"]
 
 
 async def test_call_names_endpoints_apply_to_online_connections(client):
@@ -316,14 +357,16 @@ async def test_call_names_endpoints_apply_to_online_connections(client):
     try:
         d = await (await client.get("/admin/api/call-names")).json()
         assert d["ok"] and d["devices"][0]["session_id"] == "s-7" and d["learning"]["active"] is False
-        r = await client.post("/admin/api/call-names", json={"aliases": ["cloud", "克老德"]})
-        assert r.status == 200 and (await r.json())["changed"] == ["aliases"]
-        assert fake.config["call_names"]["models"]["claude"] == ["cloud", "克老德"]  # 在线连接马上生效
-        assert client.handler.config["call_names"]["models"]["claude"] == ["cloud", "克老德"]
-        assert (await client.post("/admin/api/call-names", json={"aliases": ["x y"]})).status == 400
+        r = await client.post("/admin/api/call-names", json={"models": [{"entry": "ClaudeCLI", "aliases": ["cloud", "克老德"]}]})
+        assert r.status == 200 and (await r.json())["changed"] == ["models"]
+        assert fake.config["call_names"]["models"]["ClaudeCLI"] == ["cloud", "克老德"]  # 在线连接马上生效
+        assert client.handler.config["call_names"]["models"]["ClaudeCLI"] == ["cloud", "克老德"]
+        bad = {"models": [{"entry": "ClaudeCLI", "aliases": ["x y"]}]}
+        assert (await client.post("/admin/api/call-names", json=bad)).status == 400
 
-        r = await (await client.post("/admin/api/call-names/learn", json={})).json()
+        r = await (await client.post("/admin/api/call-names/learn", json={"target": "ClaudeCLI"})).json()
         assert r["learning"]["active"] and r["learning"]["session_id"] == "s-7"  # 只有一台在线时自动选它
+        assert r["learning"]["target"] == "ClaudeCLI"
         assert (await client.post("/admin/api/call-names/learn", json={"session_id": "gone"})).status == 400
         r = await (await client.post("/admin/api/call-names/learn/stop", json={})).json()
         assert r["learning"]["active"] is False

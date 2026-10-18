@@ -35,6 +35,7 @@ def snapshot() -> list:
             "device_id": getattr(conn, "device_id", None),
             "ip": getattr(conn, "client_ip", None),
             "connected_at": int(since),
+            "model": (getattr(conn, "hub_route", None) or {}).get("current"),  # 呼名切到的模型
         }
         for sid, (conn, since) in items
     ]

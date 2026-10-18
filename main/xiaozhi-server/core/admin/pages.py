@@ -378,37 +378,52 @@ def remember_api_intent(mode: str, path: Path = None) -> None:
 
 # ---------- 呼名 ----------
 
-CALL_TARGET = "claude"  # 目前只支持呼叫 Claude；多模型路由做好后，这里换成可选的模型
 ALIAS_BAD = re.compile(r"[\s,，.。!！?？、~～;；:：\"'“”‘’]")
 
 
-def describe_call_names(merged: dict) -> dict:
+def call_targets(merged: dict) -> list:
+    """可以配称呼的模型：本机 Claude Code，以及已经填好的 API 厂商。"""
     from core.agent import call_names
 
+    result = []
+    if config_store.entry_type(merged, "LLM", CLAUDE_CLI_ENTRY) == "claude_cli":
+        result.append({"entry": CLAUDE_CLI_ENTRY, "label": "Claude（本机 Claude Code）",
+                       "suggest": list(call_names.DEFAULT_MODELS[CLAUDE_CLI_ENTRY])})
+    for vendor in catalog.LLM_VENDORS:
+        if describe_vendor(vendor, merged)["configured"]:
+            label = vendor["label"].lower()
+            result.append({"entry": vendor["entry"], "label": f"{vendor['label']}（API）",
+                           "suggest": [label] if not ALIAS_BAD.search(label) and len(label) >= 2 else []})
+    return result
+
+
+def describe_call_names(merged: dict) -> dict:
+    from core.agent import call_names, llm_router
+
     cfg = merged.get("call_names") or {}
-    models = cfg.get("models") or {}
-    custom = CALL_TARGET in models
-    aliases = call_names._aliases(models.get(CALL_TARGET)) if custom else list(call_names.DEFAULT_MODELS[CALL_TARGET])
+    raw = cfg.get("models") or call_names.DEFAULT_MODELS
+    targets = {t["entry"]: t for t in call_targets(merged)}
+    models = []
+    for key, value in raw.items():
+        entry = llm_router.entry_name(str(key))
+        if any(m["entry"] == entry for m in models):
+            continue
+        t = targets.get(entry)
+        models.append({"entry": entry, "label": t["label"] if t else entry, "aliases": call_names._aliases(value),
+                       "ready": t is not None, "suggest": t["suggest"] if t else []})
     return {
         "enabled": bool(cfg.get("enabled", True)),
         "reply": str(cfg.get("reply") or call_names.DEFAULT_REPLY),
-        "target": "Claude",
-        "aliases": aliases,
-        "default_aliases": list(call_names.DEFAULT_MODELS[CALL_TARGET]),
+        "models": models,
+        "targets": list(targets.values()),
+        "default": _selected(merged, "LLM"),
         "prefixes": ["嗨", "嘿", "hi", "hey"],
     }
 
 
-def save_call_names(payload: dict, merged: dict, path: Path = None) -> list:
-    """保存呼名设置，返回修改了的项。取值不对时抛出 ValueError。"""
+def _clean_aliases(raw, label: str, taken: dict) -> list:
     from core.agent import call_names
 
-    current = describe_call_names(merged)
-    enabled = bool(payload.get("enabled", current["enabled"]))
-    reply = str(payload.get("reply", current["reply"]) or "").strip() or call_names.DEFAULT_REPLY
-    if len(reply) > 40:
-        raise ValueError("回复太长了，请控制在 40 个字以内")
-    raw = payload.get("aliases", current["aliases"])
     if not isinstance(raw, list):
         raise ValueError("称呼格式不对")
     aliases = []
@@ -422,16 +437,55 @@ def save_call_names(payload: dict, merged: dict, path: Path = None) -> list:
             raise ValueError(f"称呼“{alias}”要在 2 到 20 个字之间")
         if alias in call_names._PREFIXES:
             raise ValueError(f"“{alias}”是开头的招呼语，不能当称呼")
+        if alias in taken:
+            raise ValueError(f"称呼“{alias}”同时给了 {taken[alias]} 和 {label}，只能给一个模型")
+        taken[alias] = label
         aliases.append(alias)
-    if enabled and not aliases:
-        raise ValueError("至少要有一个称呼")
+    if not aliases:
+        raise ValueError(f"{label} 至少要有一个称呼，不用的话请删掉这个模型")
+    return aliases
 
-    changed = [k for k, v in (("enabled", enabled), ("reply", reply), ("aliases", aliases)) if v != current[k]]
+
+def save_call_names(payload: dict, merged: dict, path: Path = None) -> list:
+    """保存呼名设置，返回修改了的项。取值不对时抛出 ValueError。
+
+    payload["models"] 是 [{"entry": 条目名, "aliases": [...]}]。新加的模型必须已经配置好；
+    原来就有、后来没配置好的模型可以保留（叫到时设备会提示还没配置好）。
+    """
+    from core.agent import call_names
+
+    current = describe_call_names(merged)
+    enabled = bool(payload.get("enabled", current["enabled"]))
+    reply = str(payload.get("reply", current["reply"]) or "").strip() or call_names.DEFAULT_REPLY
+    if len(reply) > 40:
+        raise ValueError("回复太长了，请控制在 40 个字以内")
+    raw = payload.get("models")
+    if raw is None:
+        raw = [{"entry": m["entry"], "aliases": m["aliases"]} for m in current["models"]]
+    if not isinstance(raw, list):
+        raise ValueError("模型列表格式不对")
+    known = {m["entry"]: m["label"] for m in current["models"]}
+    known.update({t["entry"]: t["label"] for t in current["targets"]})
+    allowed = {t["entry"] for t in current["targets"]} | {m["entry"] for m in current["models"]}
+    models, taken = {}, {}
+    for item in raw:
+        entry = str((item or {}).get("entry") or "") if isinstance(item, dict) else ""
+        if entry not in allowed:
+            raise ValueError(f"模型“{entry}”还没配置好，请先到“大模型”页填好再来")
+        if entry in models:
+            raise ValueError(f"{known[entry]} 重复了")
+        models[entry] = _clean_aliases(item.get("aliases"), known[entry], taken)
+    if enabled and not models:
+        raise ValueError("至少要给一个模型配称呼")
+
+    old_models = {m["entry"]: m["aliases"] for m in current["models"]}
+    changed = [k for k, new, old in (("enabled", enabled, current["enabled"]), ("reply", reply, current["reply"]),
+                                     ("models", list(models.items()), list(old_models.items()))) if new != old]
     if not changed:
         return []
     with config_store.edit_custom(path) as data:
         cfg = data.setdefault("call_names", CommentedMap())
         cfg["enabled"] = enabled
         cfg["reply"] = reply
-        cfg.setdefault("models", CommentedMap())[CALL_TARGET] = CommentedSeq(aliases)
+        cfg["models"] = CommentedMap((k, CommentedSeq(v)) for k, v in models.items())
     return changed

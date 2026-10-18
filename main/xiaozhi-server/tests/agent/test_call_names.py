@@ -4,13 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.agent import call_names
+from core.admin import catalog  # noqa: F401  提前导入：在事件循环里第一次导入会触发加载配置
+from core.agent import call_names, llm_router
 from core.agent.call_names import handle_call_name, match_call_name
 
 
 @pytest.mark.parametrize("asr_text", ["Hi, cloud.", "Hi, cloud. Hi, cloud.", "High cloud.", "嗨 Claude", "hey，克劳德！"])
 def test_only_call_name(asr_text):
-    assert match_call_name(asr_text) == ("claude", "")
+    assert match_call_name(asr_text) == ("ClaudeCLI", "")
 
 
 @pytest.mark.parametrize("asr_text, rest", [
@@ -22,7 +23,7 @@ def test_only_call_name(asr_text):
     ("Hi Claude, 用 Python 写个脚本", "用 Python 写个脚本"),
 ])
 def test_call_name_with_content(asr_text, rest):
-    assert match_call_name(asr_text) == ("claude", rest)
+    assert match_call_name(asr_text) == ("ClaudeCLI", rest)
 
 
 @pytest.mark.parametrize("asr_text", [
@@ -42,8 +43,8 @@ def test_not_call_name(asr_text):
 
 
 def test_custom_models():
-    models = {"grok": ["格罗克"]}
-    assert match_call_name("嗨 格罗克，你怎么看", models) == ("grok", "你怎么看")
+    models = {"GrokLLM": ["格罗克"]}
+    assert match_call_name("嗨 格罗克，你怎么看", models) == ("GrokLLM", "你怎么看")
     assert match_call_name("嗨 cloud", models) is None
 
 
@@ -73,28 +74,49 @@ def spoken(monkeypatch):
     async def fake_stt(conn, text):
         out["stt"].append(text)
 
+    async def fake_switch(conn, name):
+        out["switch"].append(name)
+        return name not in out["unready"]
+
     import core.handle.intentHandler as intent_mod
     import core.handle.sendAudioHandle as send_mod
     monkeypatch.setattr(send_mod, "send_stt_message", fake_stt)
     monkeypatch.setattr(intent_mod, "speak_txt", lambda conn, text: out["tts"].append(text))
+    monkeypatch.setattr(llm_router, "switch_async", fake_switch)
     conn_messages.clear()
+    out.update(switch=[], unready=set())
     return out
 
 
 async def test_handle_passes_through_without_call_name(spoken):
     assert await handle_call_name(make_conn(), "今天天气怎么样") == "今天天气怎么样"
-    assert spoken == {"stt": [], "tts": []}
+    assert spoken["stt"] == [] and spoken["tts"] == [] and spoken["switch"] == []
 
 
-async def test_handle_strips_call_name(spoken):
+async def test_handle_strips_call_name_and_switches(spoken):
     assert await handle_call_name(make_conn(), "嗨cloud接着上次聊。") == "接着上次聊。"
-    assert spoken["tts"] == []
+    assert spoken["tts"] == [] and spoken["switch"] == ["ClaudeCLI"]
+
+
+async def test_handle_routes_by_configured_models(spoken):
+    cfg = {"models": {"claude": ["cloud"], "DeepSeekLLM": ["深度求索"]}}  # 第一期的 "claude" 键也认
+    assert await handle_call_name(make_conn(cfg), "嗨 深度求索，你好") == "你好"
+    assert await handle_call_name(make_conn(cfg), "嗨 cloud") is None
+    assert spoken["switch"] == ["DeepSeekLLM", "ClaudeCLI"]
+
+
+async def test_handle_unready_model_tells_user(spoken):
+    spoken["unready"].add("KimiLLM")
+    c = make_conn({"models": {"KimiLLM": ["kimi"]}})
+    assert await handle_call_name(c, "嗨 kimi，你好") is None  # 不交给当前模型，提示还没配置好
+    assert spoken["tts"] == ["Kimi 还没配置好，请到管理后台检查"]
 
 
 async def test_handle_only_call_name_replies_without_model(spoken):
     c = make_conn()
     assert await handle_call_name(c, "Hi, cloud.") is None
-    assert spoken == {"stt": ["Hi, cloud."], "tts": [call_names.DEFAULT_REPLY]}
+    assert spoken["stt"] == ["Hi, cloud."] and spoken["tts"] == [call_names.DEFAULT_REPLY]
+    assert spoken["switch"] == ["ClaudeCLI"]  # 只说称呼也会切换并记住
     assert c.client_abort is False and c.sentence_id
     assert [m.role for m in conn_messages] == ["user"]
 
@@ -127,7 +149,8 @@ def test_extract_alias(asr_text, alias):
 def test_learner_counts_and_targets_device():
     lr = call_names.Learner()
     assert lr.capture("s1", "嗨 cloud") is None  # 没开始录入
-    lr.start("s1", count=2)
+    lr.start("s1", count=2, target="ClaudeCLI")
+    assert lr.status()["target"] == "ClaudeCLI"
     assert lr.capture("s2", "嗨 cloud") is None  # 不是目标设备
     assert lr.capture("s1", "嗨 cloud") == (1, 2)
     assert lr.capture("s1", "嗨 克劳德") == (2, 2)

@@ -1,0 +1,162 @@
+"""多模型路由的单元测试：按连接切换模型、各聊各的、记住上次的模型、连接关闭通知到每个用过的模型。"""
+
+from types import SimpleNamespace
+
+import pytest
+
+from core.agent import llm_router
+from core.agent.session_store import SessionStore
+from core.utils import llm as llm_utils
+from core.utils.dialogue import Dialogue, Message
+
+
+class FakeLLM:
+    def __init__(self, name, config=None):
+        self.name, self.config = name, config
+        self.opened, self.closed, self.retired = [], [], False
+
+    def on_conn_open(self, conn):
+        self.opened.append(conn.session_id)
+
+    def on_conn_close(self, conn):
+        self.closed.append(conn.session_id)
+
+    def shutdown(self):
+        self.retired = True
+
+
+def server_config():
+    return {
+        "selected_module": {"LLM": "ClaudeCLI"},
+        "LLM": {
+            "ClaudeCLI": {"type": "claude_cli"},
+            "DeepSeekLLM": {"type": "openai", "url": "https://api.deepseek.com", "model_name": "deepseek-chat",
+                            "api_key": "sk-123"},
+            "KimiLLM": {"type": "openai", "base_url": "https://api.moonshot.cn/v1", "model_name": "kimi",
+                        "api_key": "你的api_key"},
+        },
+    }
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    created = []
+
+    def create(kind, config):
+        inst = FakeLLM(kind, config)
+        created.append(inst)
+        return inst
+
+    monkeypatch.setattr(llm_utils, "create_instance", create)
+    monkeypatch.setattr(llm_router, "_store", SessionStore(tmp_path / "agent_sessions.json", "last_model"))
+    monkeypatch.setattr(llm_router, "_pool", {})
+    default = FakeLLM("default")
+    server = SimpleNamespace(config=server_config(), _llm=default)
+    return SimpleNamespace(server=server, default=default, created=created)
+
+
+def make_conn(env, sid="s1", device="dev-1"):
+    dialogue = Dialogue()
+    dialogue.put(Message(role="system", content="系统提示"))
+    dialogue.put(Message(role="user", content="示例", is_temporary=True))
+    return SimpleNamespace(session_id=sid, device_id=device, server=env.server, llm=env.server._llm,
+                           dialogue=dialogue, prompt="系统提示", config={})
+
+
+def users(conn):
+    return [m.content for m in conn.dialogue.dialogue if m.role == "user" and not m.is_temporary]
+
+
+def test_model_ready():
+    cfg = server_config()
+    assert llm_router.model_ready(cfg, "ClaudeCLI")
+    assert llm_router.model_ready(cfg, "DeepSeekLLM")
+    assert not llm_router.model_ready(cfg, "KimiLLM")  # Key 还是占位文字
+    assert not llm_router.model_ready(cfg, "Nope")
+
+
+def test_switch_keeps_separate_dialogues(env):
+    conn = make_conn(env)
+    llm_router.on_conn_open(conn)
+    assert env.default.opened == ["s1"]
+    conn.dialogue.put(Message(role="user", content="问 Claude"))
+
+    assert llm_router.switch(conn, "DeepSeekLLM")
+    deepseek = env.created[0]
+    assert conn.llm is deepseek and deepseek.opened == ["s1"]
+    assert users(conn) == []  # 不带 Claude 的对话过去
+    assert [m.content for m in conn.dialogue.dialogue if m.role == "system"] == ["系统提示"]
+    assert any(m.is_temporary for m in conn.dialogue.dialogue)  # 工具调用示例保留
+    conn.dialogue.put(Message(role="user", content="问 DeepSeek"))
+
+    assert llm_router.switch(conn, "ClaudeCLI")
+    assert conn.llm is env.default and users(conn) == ["问 Claude"]
+    assert llm_router.switch(conn, "DeepSeekLLM")
+    assert conn.llm is deepseek and users(conn) == ["问 DeepSeek"]  # 切回来还记得
+    assert deepseek.opened == ["s1"]  # 同一个连接只通知一次
+
+
+def test_unready_model_does_not_switch(env):
+    conn = make_conn(env)
+    llm_router.on_conn_open(conn)
+    assert llm_router.switch(conn, "KimiLLM") is False
+    assert conn.llm is env.default and env.created == []
+    assert llm_router.remembered(conn) is None
+
+
+def test_remembers_last_model_per_device(env):
+    conn = make_conn(env)
+    llm_router.on_conn_open(conn)
+    llm_router.switch(conn, "DeepSeekLLM")
+    assert llm_router.remembered(conn) == "DeepSeekLLM"
+
+    again = make_conn(env, sid="s2")  # 同一台设备重连
+    llm_router.on_conn_open(again)
+    assert again.llm is env.created[0] and again.hub_route["current"] == "DeepSeekLLM"
+    other = make_conn(env, sid="s3", device="dev-2")  # 别的设备不受影响
+    llm_router.on_conn_open(other)
+    assert other.llm is env.default and other.hub_route["current"] == "ClaudeCLI"
+
+
+def test_remembered_model_gone_falls_back_to_default(env):
+    conn = make_conn(env)
+    llm_router.on_conn_open(conn)
+    llm_router.switch(conn, "DeepSeekLLM")
+    env.server.config["LLM"]["DeepSeekLLM"]["api_key"] = ""  # 后台把 Key 清掉了
+    again = make_conn(env, sid="s2")
+    llm_router.on_conn_open(again)
+    assert again.llm is env.default
+
+
+def test_close_notifies_every_used_model(env):
+    conn = make_conn(env)
+    llm_router.on_conn_open(conn)
+    llm_router.switch(conn, "DeepSeekLLM")
+    llm_router.switch(conn, "ClaudeCLI")
+    llm_router.on_conn_close(conn)
+    assert env.default.closed == ["s1"] and env.created[0].closed == ["s1"]
+
+
+def test_instances_shared_and_rebuilt_when_config_changes(env):
+    a, b = make_conn(env, "s1", "d1"), make_conn(env, "s2", "d2")
+    for c in (a, b):
+        llm_router.on_conn_open(c)
+        llm_router.switch(c, "DeepSeekLLM")
+    assert a.llm is b.llm and len(env.created) == 1  # 所有连接共用
+
+    env.server.config["LLM"]["DeepSeekLLM"]["model_name"] = "deepseek-reasoner"  # 后台保存后热加载
+    c = make_conn(env, "s3", "d3")
+    llm_router.on_conn_open(c)
+    llm_router.switch(c, "DeepSeekLLM")
+    assert len(env.created) == 2 and c.llm is env.created[1]
+    assert env.created[0].retired and a.llm is env.created[0]  # 在线连接继续用旧实例
+
+
+def test_default_model_uses_server_instance(env):
+    env.server.config["selected_module"]["LLM"] = "DeepSeekLLM"
+    env.server._llm = FakeLLM("deepseek-default")
+    conn = make_conn(env)
+    conn.llm = env.server._llm
+    llm_router.on_conn_open(conn)
+    assert llm_router.switch(conn, "ClaudeCLI") and conn.llm is env.created[0]
+    assert llm_router.switch(conn, "DeepSeekLLM") and conn.llm is env.server._llm
