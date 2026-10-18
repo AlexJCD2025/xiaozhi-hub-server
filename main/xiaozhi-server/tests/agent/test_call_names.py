@@ -136,7 +136,8 @@ async def test_handle_waits_for_tts_then_falls_back(spoken, monkeypatch):
 async def test_handle_disabled_and_custom_reply(spoken):
     assert await handle_call_name(make_conn({"enabled": False}), "Hi, cloud.") == "Hi, cloud."
     assert await handle_call_name(make_conn({"reply": "Claude 在呢"}), "嗨 Claude") is None
-    assert spoken["tts"] == ["Claude 在呢"]
+    assert await handle_call_name(make_conn({"reply": "我在，请说。"}), "嗨 Claude") is None
+    assert spoken["tts"] == ["Claude 在呢", "我在 请说"]  # 去掉句中标点，一次合成，不切成两段
 
 
 # ---------- 录入 ----------
@@ -177,3 +178,30 @@ async def test_learning_intercepts_before_model(spoken, monkeypatch):
     assert await handle_call_name(c, "嗨 克劳德") is None
     assert spoken["tts"][-1] == "录好了，请到管理后台确认"
     assert await handle_call_name(c, "今天天气怎么样") == "今天天气怎么样"  # 录满后恢复正常
+
+
+async def test_only_call_name_reply_audio_is_cached(spoken, monkeypatch):
+    """固定回复第一次照常合成并在后台缓存，之后直接发缓存的音频，不再等 TTS。"""
+    import asyncio
+
+    import core.handle.sendAudioHandle as send_mod
+
+    sent = []
+
+    async def fake_send_audio(conn, sentence_type, audios, text, sentence_id=None):
+        sent.append((sentence_type.name, audios, text))
+
+    monkeypatch.setattr(send_mod, "sendAudioMessage", fake_send_audio)
+    monkeypatch.setattr(call_names, "_audio_cache", {})
+    c = make_conn()
+    c.tts = SimpleNamespace(voice="v1", to_tts=lambda text: [b"opus-" + text.encode()])
+    c.sample_rate = 24000
+
+    assert await handle_call_name(c, "嗨 cloud") is None
+    assert spoken["tts"] == [call_names.DEFAULT_REPLY] and sent == []  # 第一次走正常合成
+    # 等后台缓存任务结束（测试环境的 asyncio.sleep 不真正等待）
+    await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+    assert await handle_call_name(c, "嗨 cloud") is None
+    assert spoken["tts"] == [call_names.DEFAULT_REPLY]  # 第二次不再合成
+    assert sent == [("FIRST", [b"opus-" + call_names.DEFAULT_REPLY.encode()], call_names.DEFAULT_REPLY),
+                    ("LAST", [], None)]
