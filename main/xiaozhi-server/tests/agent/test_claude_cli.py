@@ -275,6 +275,36 @@ def test_resume_keyword_resumes_old_session_without_sending(provider):
     assert agent.resume_id == "old-sid" and agent.sent == []
 
 
+def test_resume_keyword_with_more_content_is_sent_to_claude(provider):
+    provider.store.touch("dev-1", "old-sid", now=time.time() - 10 * 3600)
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "接着上次聊那个 bug 吧")
+    agent = FakeAgent.instances[0]
+    # 接续旧会话，并且整句话照常发给 Claude，后半句不会被吞掉
+    assert agent.resume_id == "old-sid" and agent.sent == ["接着上次聊那个 bug 吧"]
+    assert out == "🙂好"
+
+
+def test_resume_keyword_with_content_but_no_history(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "接着上次聊那个 bug")
+    assert out.startswith("😶没有找到之前的对话") and out.endswith("🙂好")
+    assert FakeAgent.instances[0].sent == ["接着上次聊那个 bug"]
+
+
+def test_match_resume_remainder():
+    from core.agent.voice_commands import match_resume
+    assert match_resume("嗯，接着上次聊吧！") == ""
+    assert match_resume("帮我接着上次聊") == ""
+    assert match_resume("接着上次量。") == ""
+    assert match_resume("接着上次聊那个bug") == "那个bug"
+    assert match_resume("继续刚才的话题，那个函数改好了吗") == "那个函数改好"
+    assert match_resume("别接着上次聊了") is None
+    assert match_resume("今天天气怎么样") is None
+
+
 def test_resume_keyword_without_history_says_so(provider):
     c = conn()
     provider.on_conn_open(c)

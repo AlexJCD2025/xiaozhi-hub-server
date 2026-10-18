@@ -27,7 +27,7 @@ from config.logger import setup_logging
 from core.agent.agent_session import Activity, AgentSessionError, Done, Error, ErrorKind, TextDelta
 from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
-from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, wants_resume
+from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, match_resume
 from core.providers.llm.base import LLMProviderBase
 from core.utils import textUtils
 from core.utils.prompt_manager import EMOJI_List
@@ -222,10 +222,15 @@ class LLMProvider(LLMProviderBase):
             await self._close_agent(st, "中断无效")
 
     async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
-        """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。"""
+        """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。
+
+        接续指令后面还带着别的内容时（如"接着上次聊那个 bug"），接续后把整句话照常发给 Claude，
+        不能只回一句"好的"就把后半句吞掉。
+        """
         if st.agent and st.agent.alive:
             return False
-        keyword = wants_resume(text, self.resume_keywords)
+        remainder = match_resume(text, self.resume_keywords)
+        keyword = remainder is not None
         resume_id, reason = choose_resume(self.store.get(st.key), keyword, self.resume_window)
         cfg = ClaudeSessionConfig(**{**self.session_config.__dict__,
                                      "system_prompt_append": (system_prompt or "") + "\n" + VOICE_RULES})
@@ -251,13 +256,15 @@ class LLMProvider(LLMProviderBase):
             f"Claude Code 进程已启动（{time.time() - t0:.1f}s），设备 {st.key}，"
             f"{'接续会话 ' + resume_id if resume_id else '新会话 ' + agent.session_id}（{reason}）"
         )
-        if keyword:
+        if keyword and not remainder:
             if resume_id:
                 out.put(TextDelta("😉好的，我们接着上次聊。"))
             elif reason == "no_record":
                 out.put(TextDelta("😶没有找到之前的对话，我们重新开始吧。"))
             out.put(Done(session_id=agent.session_id))
             return True
+        if keyword and reason == "no_record":
+            out.put(TextDelta("😶没有找到之前的对话，我们重新开始吧。"))
         return False
 
     async def _run_turn(self, st: ConnState, text: str, system_prompt: str, out: queue.Queue) -> None:
