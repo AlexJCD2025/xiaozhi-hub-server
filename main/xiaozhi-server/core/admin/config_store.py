@@ -13,6 +13,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -52,6 +54,19 @@ def load_custom(path: Path = None) -> CommentedMap:
     with open(path, "r", encoding="utf-8") as f:
         data = _yaml().load(f)
     return data if isinstance(data, CommentedMap) else CommentedMap()
+
+
+# 后台的每个保存请求在线程池里各自执行；读改写整个过程要串行，否则两个请求同时保存时后写的会覆盖先写的
+_WRITE_LOCK = threading.RLock()
+
+
+@contextmanager
+def edit_custom(path: Path = None):
+    """读取 data/.config.yaml 交给调用方修改，正常结束时写回；中途出错不写入。"""
+    with _WRITE_LOCK:
+        data = load_custom(path)
+        yield data
+        save_custom(data, path)
 
 
 def save_custom(data: CommentedMap, path: Path = None) -> None:
@@ -176,11 +191,10 @@ def update_entry(section: str, name: str, payload: dict, merged: dict, path: Pat
             changes[field] = value
     if not changes:
         return []
-    data = load_custom(path)
-    target = data.setdefault(section, CommentedMap()).setdefault(name, CommentedMap())
-    for field, value in changes.items():
-        target[field] = value
-    save_custom(data, path)
+    with edit_custom(path) as data:
+        target = data.setdefault(section, CommentedMap()).setdefault(name, CommentedMap())
+        for field, value in changes.items():
+            target[field] = value
     return list(changes)
 
 
@@ -189,9 +203,8 @@ def select_entry(section: str, name: str, merged: dict, path: Path = None) -> No
         raise KeyError(section)
     if name not in (merged.get(section) or {}):
         raise KeyError(name)
-    data = load_custom(path)
-    data.setdefault("selected_module", CommentedMap())[section] = name
-    save_custom(data, path)
+    with edit_custom(path) as data:
+        data.setdefault("selected_module", CommentedMap())[section] = name
 
 
 def entry_type(merged: dict, section: str, name: str = None) -> str:
@@ -208,6 +221,5 @@ def get_password_hash(path: Path = None):
 
 
 def set_password_hash(password_hash: str, path: Path = None) -> None:
-    data = load_custom(path)
-    data.setdefault("admin", CommentedMap())["password_hash"] = password_hash
-    save_custom(data, path)
+    with edit_custom(path) as data:
+        data.setdefault("admin", CommentedMap())["password_hash"] = password_hash
