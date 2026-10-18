@@ -7,6 +7,9 @@
 
 每个设备连接最多对应一个常驻的 Claude Code 进程：首句话到来时启动（顺便决定新开还是接续），
 空闲超时、连接关闭或服务退出时结束。
+
+管理后台热加载大模型时，旧实例会被调用 shutdown()：已连接的设备继续用旧实例对话，
+等最后一个连接关闭、手上的任务都结束后，再停止事件循环，后台线程随之退出。
 """
 
 import asyncio
@@ -139,10 +142,51 @@ class LLMProvider(LLMProviderBase):
 
         self._states: Dict[str, ConnState] = {}
         self._states_lock = threading.Lock()
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._loop.run_forever, name="claude-cli-loop", daemon=True)
-        self._thread.start()
+        self._retiring = False  # 已被新实例替换：没有连接后就停止事件循环
+        self._stopping = False  # 已安排停止事件循环
+        self._start_loop()
         self._self_check()
+
+    def _start_loop(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, args=(self._loop,), name="claude-cli-loop", daemon=True)
+        self._thread.start()
+
+    @staticmethod
+    def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_forever()
+        finally:
+            loop.close()
+
+    # ---------- 退役（管理后台热加载后调用） ----------
+
+    def shutdown(self) -> None:
+        """实例被替换后调用：不再接新连接，现有连接照常对话；没有连接时停止事件循环，后台线程退出。"""
+        with self._states_lock:
+            self._retiring = True
+        logger.bind(tag=TAG).info(f"claude_cli 旧实例退役，剩余连接 {len(self._states)} 个，全部关闭后结束后台线程")
+        self._maybe_stop()
+
+    def _maybe_stop(self) -> None:
+        with self._states_lock:
+            if not self._retiring or self._stopping or self._states:
+                return
+            self._stopping = True
+            loop = self._loop
+        asyncio.run_coroutine_threadsafe(self._stop_loop(), loop)
+
+    async def _stop_loop(self, timeout: float = 30) -> None:
+        """等循环里剩下的任务（关闭进程、收尾中的一轮对话）结束，再停止循环。"""
+        loop = asyncio.get_running_loop()
+        pending = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+        if pending:
+            _, still = await asyncio.wait(pending, timeout=timeout)
+            for t in still:
+                t.cancel()
+        loop.stop()
+        logger.bind(tag=TAG).info("claude_cli 旧实例的后台线程已结束")
 
     # ---------- 启动自检 ----------
 
@@ -163,6 +207,11 @@ class LLMProvider(LLMProviderBase):
 
     def _state(self, session_id: str) -> ConnState:
         with self._states_lock:
+            if self._stopping:
+                # 极少见：替换实例的瞬间刚好有设备连上旧实例，而循环已经在停止。重新开一个循环给它用，
+                # 它关闭后会再次停止。
+                self._stopping = False
+                self._start_loop()
             st = self._states.get(session_id)
             if st is None:
                 st = ConnState(key=session_id)
@@ -186,6 +235,7 @@ class LLMProvider(LLMProviderBase):
         if st:
             st.closed = True
             asyncio.run_coroutine_threadsafe(self._close_agent(st, "连接关闭"), self._loop)
+        self._maybe_stop()
 
     # ---------- 后台循环中的逻辑 ----------
 
