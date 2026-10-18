@@ -6,6 +6,9 @@ server:
   http_port: 16688  # HTTP：OTA 接口和管理后台。设备配网时填 http://<本机IP>:16688/xiaozhi/ota/
   port: 16689       # WebSocket：设备的语音长连接，地址由 OTA 接口自动下发
 
+# 每句话开始时先多发约 0.9 秒音频（15 帧 × 60ms），避免 Wi-Fi 抖动导致设备说话断续（原项目默认 5 帧）
+tts_audio_prebuffer_count: 15
+
 selected_module:
   VAD: SileroVAD
   ASR: FunASR

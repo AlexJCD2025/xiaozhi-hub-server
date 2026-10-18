@@ -18,6 +18,14 @@ AUDIO_FRAME_DURATION = 60
 PRE_BUFFER_COUNT = 5
 
 
+def _pre_buffer_count(conn) -> int:
+    """[xiaozhi-hub] 预缓冲包数可配置（tts_audio_prebuffer_count）。Wi-Fi 抖动较大时调大，设备播放更顺滑。"""
+    try:
+        return max(1, int(conn.config.get("tts_audio_prebuffer_count", PRE_BUFFER_COUNT)))
+    except (TypeError, ValueError):
+        return PRE_BUFFER_COUNT
+
+
 async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
     # 跳过旧句子残留音频
     if sentence_id is not None and sentence_id != conn.sentence_id:
@@ -75,7 +83,7 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
             playback_time = 2 * rate_controller.interval_ms / 1000.0
         else:
             # 默认节奏：前 N 帧预缓冲已直接发出，需要等待它们播放完成
-            playback_time = (PRE_BUFFER_COUNT + 2) * rate_controller.interval_ms / 1000.0
+            playback_time = (_pre_buffer_count(conn) + 2) * rate_controller.interval_ms / 1000.0
         await asyncio.sleep(playback_time)
 
         conn.logger.bind(tag=TAG).debug("音频发送完成")
@@ -254,9 +262,21 @@ async def _send_audio_with_rate_control(
             rate_controller.add_audio(packet)
         else:
             # 默认节奏模式（60ms/包）：前 N 包预缓冲直接发，后续入队由后台任务按 interval_ms 节奏发
-            if flow_control["packet_count"] < PRE_BUFFER_COUNT:
+            if flow_control["packet_count"] < _pre_buffer_count(conn):
+                await _do_send_audio(conn, packet, flow_control)
+                continue
+            # [xiaozhi-hub] 队列播空后（上一句发完、下一句还在合成）重新预缓冲一次，
+            # 否则第一句之后设备缓冲一直接近 0，Wi-Fi 稍有抖动就会断断续续。
+            if not rate_controller.queue and not flow_control.get("in_burst"):
+                idle_ms = (time.monotonic() - rate_controller._last_queue_empty_time) * 1000
+                if idle_ms > rate_controller.interval_ms:
+                    flow_control["burst_left"] = _pre_buffer_count(conn)
+                    flow_control["in_burst"] = True
+            if flow_control.get("burst_left", 0) > 0:
+                flow_control["burst_left"] -= 1
                 await _do_send_audio(conn, packet, flow_control)
             else:
+                flow_control["in_burst"] = False
                 rate_controller.add_audio(packet)
 
 
