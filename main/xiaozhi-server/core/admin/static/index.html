@@ -89,6 +89,22 @@
   .chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
   .chip.risky { border-style: dashed; }
   .chip.risky.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+  .cli-row { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+  .cli-row:first-child { border-top: 0; padding-top: 0; }
+  .cli-k { font-weight: 500; padding-top: 9px; }
+  .cli-row .seg { margin-top: 0; flex-wrap: wrap; }
+  .cli-row .seg button { padding: 6px 14px; line-height: 1.3; }
+  .cli-row .seg button small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  #model-custom { margin-top: 8px; }
+  .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .level { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; text-align: left; background: var(--card); cursor: pointer; }
+  .level b { display: block; font-size: 14px; }
+  .level small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .level.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .level.auto.on { border-color: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+  .switch { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; cursor: pointer; }
+  .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .switch small { color: var(--muted); font-size: 12px; }
   details.adv { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
   details.adv summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   details.adv[open] summary { margin-bottom: 14px; }
@@ -232,7 +248,8 @@
     .nav .ico { display: none; }
     .side-foot { display: none; }
     main { padding: 20px 16px 56px; }
-    .choices, .grid2, .grid3, .plugins, .branches { grid-template-columns: 1fr; }
+    .choices, .grid2, .grid3, .plugins, .branches, .levels { grid-template-columns: 1fr; }
+    .cli-row { grid-template-columns: 1fr; gap: 6px; } .cli-k { padding-top: 0; }
     .flow { flex-direction: column; overflow: visible; }
     .arrow { transform: rotate(90deg); }
     .params > div { grid-template-columns: 1fr; gap: 2px; }
@@ -564,12 +581,7 @@ async function renderLLM(root) {
     llmVendor = d.vendor || (d.vendors.find((x) => x.configured) || d.vendors[0]).id;
   }
   const current = usingCli ? `Claude Code CLI · ${v.model || "默认模型"}` : active ? `${active.label} · ${active.model}` : d.selected;
-  const modelOpts = c.options.model.slice();
-  if (v.model && !modelOpts.find((o) => o.value === v.model)) modelOpts.push({ value: v.model, label: v.model });
-  const permOpts = c.options.permission_mode.slice();
-  if (v.permission_mode && !permOpts.find((o) => o.value === v.permission_mode)) permOpts.push({ value: v.permission_mode, label: v.permission_mode });
-  const known = c.options.tools.map((t) => t.name);
-  const tools = c.options.tools.concat((v.allowed_tools || []).filter((t) => !known.includes(t)).map((t) => ({ name: t, label: "", risky: false })));
+  const customModel = !!v.model && !c.options.model.find((o) => o.value === v.model);
   const num = (name, label, hint) => `<label class="f">${label}${hint ? `<span class="hint">${hint}</span>` : ""}
     <input class="in" data-k="${name}" value="${esc(v[name] ?? "")}" inputmode="decimal"></label>`;
 
@@ -593,28 +605,39 @@ async function renderLLM(root) {
     </div>
     <div class="card panel" id="cli-form">
       ${c.exists ? `
-      <div class="grid2">
-        <label class="f">模型<select class="in" data-k="model">${modelOpts.map((o) => `<option value="${esc(o.value)}" ${o.value === v.model ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
-        <div><label class="f">思考力度<span class="hint">越低回复越快</span></label>
-          <div class="seg" data-k="effort">${c.options.effort.map((o) => `<button type="button" data-v="${o.value}" class="${o.value === (v.effort || "") ? "on" : ""}">${o.label}</button>`).join("")}</div></div>
-        <label class="f">工作目录<span class="hint">Claude 只能访问这里</span><input class="in mono" data-k="workdir" value="${esc(v.workdir || "")}"></label>
+      <div class="cli-row"><div class="cli-k">模型</div><div>
+        <div class="seg" data-k="model">${c.options.model.map((o) => `<button type="button" data-v="${o.value}" class="${o.value === v.model ? "on" : ""}">${o.label}<small>${esc(o.hint)}</small></button>`).join("")}
+          <button type="button" data-v="__custom" class="${customModel ? "on" : ""}">自定义<small>填完整模型名</small></button></div>
+        <input class="in mono hidden" id="model-custom" data-k="model_custom" value="${esc(customModel ? v.model : "")}" placeholder="例如 claude-sonnet-5-5" style="max-width:320px">
+      </div></div>
+      <div class="cli-row"><div class="cli-k">思考级别</div><div>
+        <div class="seg" data-k="effort">${c.options.effort.map((o) => `<button type="button" data-v="${o.value}" class="${o.value === (v.effort || "") ? "on" : ""}">${o.label}</button>`).join("")}</div>
+        <div class="small muted" style="margin-top:6px">越高想得越久、回复越慢。<span id="effort-note" class="hidden" style="color:var(--warn)">超高和最高可能要等十几秒才开口，语音对话不推荐。</span></div>
+      </div></div>
+      <div class="cli-row"><div class="cli-k">权限级别</div><div>
+        ${c.level === "custom" ? '<div class="banner warn" style="margin:0 0 10px">当前的工具和权限模式是手动配置的，和下面三档都对不上。选一档保存后会按这档重新设置。</div>' : ""}
+        <div class="levels">${c.options.level.map((lv) => `<button type="button" class="level ${lv.value === c.level ? "on" : ""} ${lv.value}" data-level="${lv.value}">
+          <b>${esc(lv.label)}</b><small>${esc(lv.desc)}</small></button>`).join("")}</div>
+        <label class="switch"><input type="checkbox" data-k="web" ${c.web ? "checked" : ""}><span>允许联网搜索</span>
+          <small>可以搜索网页、打开网页，回答实时问题会多等几秒</small></label>
+      </div></div>
+      <div class="grid2" style="margin-top:6px">
+        <label class="f">工作目录<span class="hint">读写文件只能在这个目录里</span><input class="in mono" data-k="workdir" value="${esc(v.workdir || "")}"></label>
         <label class="f">填充语<span class="hint">回复慢时先说这句，留空关闭</span><input class="in" data-k="first_reply_filler" value="${esc(v.first_reply_filler || "")}"></label>
       </div>
-      <label class="f" style="margin-top:16px">允许的工具<span class="hint">点一下开启或关闭</span></label>
-      <div class="chips" id="tools">${tools.map((t) => `<button type="button" class="chip ${t.risky ? "risky" : ""} ${(v.allowed_tools || []).includes(t.name) ? "on" : ""}" data-tool="${esc(t.name)}">${esc(t.name)}${t.label ? " " + esc(t.label) : ""}</button>`).join("")}</div>
-      <div class="small" style="margin-top:8px;color:var(--warn)">虚线的工具能在电脑上执行命令或修改文件。语音可能被误识别，开启前请确认。</div>
-      <details class="adv"><summary>高级设置（超时、自动接续、关键字）</summary>
+      <details class="adv"><summary>高级设置（超时、自动接续、当前开放的工具）</summary>
         <div class="grid3">
           ${num("turn_timeout_seconds", "单轮超时（秒）")}
           ${num("stall_timeout_seconds", "无响应超时（秒）", "卡住多久就中断")}
           ${num("idle_timeout_seconds", "空闲关闭进程（秒）")}
           ${num("resume_window_minutes", "自动接续（分钟）", "这段时间内重连接着聊")}
           ${num("filler_delay_seconds", "填充语等待（秒）")}
-          <label class="f">权限模式<select class="in" data-k="permission_mode">${permOpts.map((o) =>
-            `<option value="${esc(o.value)}" ${o.value === v.permission_mode ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
           <label class="f full">接续关键字<span class="hint">超过自动接续时间后，说这些话会接着上次的对话，用逗号分隔</span>
             <input class="in" data-k="resume_keywords" value="${esc((v.resume_keywords || []).join("，"))}"></label>
           <label class="f full">CLI 路径<span class="hint">留空自动查找</span><input class="in mono" data-k="cli_path" value="${esc(v.cli_path || "")}"></label>
+          <div class="full"><label class="f">当前开放的工具<span class="hint">由权限级别和联网开关决定，权限模式 ${esc(v.permission_mode || "default")}</span></label>
+            <div class="chips">${(v.allowed_tools || []).map((t) => { const info = c.options.tools.find((x) => x.name === t);
+              return `<span class="chip on ${info && info.risky ? "risky" : ""}">${esc(t)}${info ? " " + esc(info.label) : ""}</span>`; }).join("")}</div></div>
         </div>
       </details>
       <div class="actions"><span class="result" id="cli-result"></span>
@@ -632,33 +655,40 @@ async function renderLLM(root) {
 
   // ----- 本地 CLI -----
   const form = $("cli-form");
+  const segValue = (k) => { const on = form.querySelector(`.seg[data-k="${k}"] .on`); return on ? on.dataset.v : ""; };
   const cliValues = () => {
     const out = {};
-    form.querySelectorAll("[data-k]").forEach((el) => {
-      out[el.dataset.k] = el.classList.contains("seg") ? (el.querySelector(".on") ? el.querySelector(".on").dataset.v : "") : el.value;
-    });
+    form.querySelectorAll("input[data-k], select[data-k]").forEach((el) => (out[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value));
+    out.model = segValue("model") === "__custom" ? out.model_custom.trim() : segValue("model");
+    delete out.model_custom;
+    out.effort = segValue("effort");
+    out.level = (form.querySelector("[data-level].on") || {}).dataset?.level || c.level;
     out.resume_keywords = (out.resume_keywords || "").split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-    out.allowed_tools = [...form.querySelectorAll("#tools .chip.on")].map((b) => b.dataset.tool);
     return out;
   };
   let cliDirty = () => false;
   if (c.exists) {
     const result = (html) => ($("cli-result").innerHTML = html);
+    const syncModel = () => $("model-custom").classList.toggle("hidden", segValue("model") !== "__custom");
+    const syncEffort = () => $("effort-note").classList.toggle("hidden", !(c.options.effort.find((o) => o.value === segValue("effort")) || {}).slow);
     form.querySelectorAll(".seg button").forEach((b) => (b.onclick = () => {
       b.parentElement.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      syncModel(); syncEffort();
     }));
-    form.querySelectorAll("#tools .chip").forEach((b) => (b.onclick = () => {
-      if (!b.classList.contains("on") && b.classList.contains("risky") &&
-          !confirm(`开启 ${b.textContent} 后，语音指令就能在电脑上执行命令或修改文件。确定开启吗？`)) return;
-      b.classList.toggle("on");
+    form.querySelectorAll("[data-level]").forEach((b) => (b.onclick = () => {
+      const lv = b.dataset.level;
+      if (lv !== "read" && !b.classList.contains("on") && !confirm(lv === "auto"
+          ? "Auto：Claude 可以在电脑上执行命令，由它自己判断风险，低风险的会自动执行。语音可能被误识别，确定开启吗？"
+          : "可编辑：Claude 可以在工作目录里新建和修改文件，不再询问。确定开启吗？")) return;
+      form.querySelectorAll("[data-level]").forEach((x) => x.classList.toggle("on", x === b));
     }));
+    syncModel(); syncEffort();
     cliDirty = snapshot(cliValues);
     $("cli-reset").onclick = () => { page.dirty = null; openPage("llm", true); };
     $("cli-save").onclick = (e) => busy(e.target, async () => {
       try {
         const r = await api("llm/claude", cliValues());
-        result(`<span style="color:var(--ok)">✓ ${esc(r.changed.length ? r.note : "没有修改")}</span>`);
-        cliDirty = snapshot(cliValues);
+        toast(r.changed.length ? r.note : "没有修改"); page.dirty = null; await openPage("llm", true);
       } catch (err) { result(`<span style="color:var(--err)">${esc(err.message)}</span>`); }
     });
     if ($("cli-use")) $("cli-use").onclick = (e) => busy(e.target, async () => {

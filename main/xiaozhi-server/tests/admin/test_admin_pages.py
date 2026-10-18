@@ -107,6 +107,32 @@ def test_save_claude_cli_validates_choices(cfg_path):
     assert entry["effort"] == "medium" and entry["allowed_tools"] == ["Read", "WebSearch"]
 
 
+def test_claude_levels_and_web_switch(cfg_path):
+    d = pages.describe_claude_cli(merged(cfg_path))
+    assert d["level"] == "read" and d["web"] is False
+    assert [o["value"] for o in d["options"]["model"]] == ["haiku", "sonnet", "opus", "fable"]
+    assert [o["value"] for o in d["options"]["effort"]] == ["low", "medium", "high", "xhigh", "max"]
+    pages.save_claude_cli({"level": "edit", "web": True, "effort": "xhigh"}, merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeCLI"]
+    assert e["permission_mode"] == "acceptEdits" and e["effort"] == "xhigh"
+    assert e["allowed_tools"] == ["Read", "Grep", "Glob", "Write", "Edit", "WebSearch", "WebFetch"]
+    d = pages.describe_claude_cli(merged(cfg_path))
+    assert d["level"] == "edit" and d["web"] is True
+    pages.save_claude_cli({"level": "auto", "web": False}, merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeCLI"]
+    assert e["permission_mode"] == "auto" and "Bash" in e["allowed_tools"] and "WebSearch" not in e["allowed_tools"]
+    with pytest.raises(ValueError, match="权限级别"):
+        pages.save_claude_cli({"level": "root"}, merged(cfg_path), cfg_path)
+
+
+def test_claude_custom_level_keeps_tools(cfg_path):
+    cfg_path.write_text(CUSTOM_YAML.replace("allowed_tools: [Read, Grep, Glob]", "allowed_tools: [Read, Bash]"), encoding="utf-8")
+    assert pages.describe_claude_cli(merged(cfg_path))["level"] == "custom"
+    pages.save_claude_cli({"level": "custom", "web": True}, merged(cfg_path), cfg_path)
+    e = merged(cfg_path)["LLM"]["ClaudeCLI"]
+    assert e["allowed_tools"] == ["Read", "Bash", "WebSearch", "WebFetch"] and e["permission_mode"] == "default"
+
+
 def test_vendor_test_config_prefers_unsaved_values(cfg_path):
     with pytest.raises(ValueError, match="API Key"):
         pages.vendor_test_config("claude", {}, merged(cfg_path))

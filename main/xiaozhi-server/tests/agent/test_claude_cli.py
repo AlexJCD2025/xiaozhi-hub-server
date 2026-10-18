@@ -141,6 +141,33 @@ async def test_can_use_tool_denies_outside_whitelist():
     assert type(await o.can_use_tool("Bash", {}, None)).__name__ == "PermissionResultDeny"
 
 
+async def test_tool_guard_blocks_paths_outside_workdir(tmp_path):
+    """工作目录之外的文件：权限回调和 PreToolUse 钩子都要拒绝（实测读文件不会经过权限回调）。"""
+    o = ClaudeSession(ClaudeSessionConfig(allowed_tools=["Read", "Write"], workdir=str(tmp_path)))._options()
+    name = lambda r: type(r).__name__
+    assert name(await o.can_use_tool("Read", {"file_path": str(tmp_path / "a.txt")}, None)) == "PermissionResultAllow"
+    assert name(await o.can_use_tool("Read", {"file_path": "notes/a.txt"}, None)) == "PermissionResultAllow"
+    assert name(await o.can_use_tool("Read", {"file_path": "/etc/hosts"}, None)) == "PermissionResultDeny"
+    assert name(await o.can_use_tool("Write", {"file_path": "../escape.txt"}, None)) == "PermissionResultDeny"
+    hook = o.hooks["PreToolUse"][0].hooks[0]
+    denied = await hook({"tool_name": "Read", "tool_input": {"file_path": "/etc/hosts"}}, "t1", None)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert await hook({"tool_name": "Read", "tool_input": {"file_path": "a.txt"}}, "t2", None) == {}
+    denied = await hook({"tool_name": "mcp__claude_ai_Gmail__send", "tool_input": {}}, "t3", None)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"  # 列表之外的工具
+    assert o.strict_mcp_config is True  # 不加载账号里的 claude.ai 连接器
+
+
+async def test_auto_mode_denies_unapproved_risky_tools(tmp_path):
+    """Auto 模式下走到人工审批的操作：只读工具放行，其余拒绝（没人能点同意）。"""
+    o = ClaudeSession(ClaudeSessionConfig(allowed_tools=["Read", "Bash", "WebSearch"], workdir=str(tmp_path),
+                                          permission_mode="auto"))._options()
+    assert o.permission_mode == "auto"
+    assert type(await o.can_use_tool("Read", {"file_path": "a.txt"}, None)).__name__ == "PermissionResultAllow"
+    assert type(await o.can_use_tool("WebSearch", {"query": "x"}, None)).__name__ == "PermissionResultAllow"
+    assert type(await o.can_use_tool("Bash", {"command": "ls"}, None)).__name__ == "PermissionResultDeny"
+
+
 # ---------- 会话存储与接续策略、关键字 ----------
 
 def test_session_store_roundtrip(tmp_path):

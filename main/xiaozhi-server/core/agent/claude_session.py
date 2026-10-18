@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from collections import deque
@@ -17,6 +18,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     CLINotFoundError,
+    HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
     RateLimitEvent,
@@ -43,6 +45,26 @@ from core.agent.agent_session import (
 )
 
 SENTENCE_END = set("。！？!?；;…~～.\n")
+
+# 只读的工具：Auto 模式下即使走到人工审批这一步也可以放行
+READ_ONLY_TOOLS = {"Read", "Grep", "Glob", "WebSearch", "WebFetch", "TodoWrite"}
+# 工具参数里表示文件或目录的字段
+PATH_KEYS = ("file_path", "path", "notebook_path")
+
+
+def outside_workdir(tool_input: dict, workdir: Optional[str]) -> Optional[str]:
+    """工具要访问的路径在工作目录之外时，返回这个路径；否则返回 None。"""
+    if not workdir or not isinstance(tool_input, dict):
+        return None
+    root = os.path.realpath(os.path.expanduser(workdir))
+    for key in PATH_KEYS:
+        value = tool_input.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        target = os.path.realpath(os.path.join(root, os.path.expanduser(value)))
+        if os.path.commonpath([root, target]) != root:
+            return value
+    return None
 
 ASSISTANT_ERROR_KINDS = {
     "authentication_failed": ErrorKind.AUTH,
@@ -86,11 +108,35 @@ class ClaudeSession(AgentSession):
     def _options(self) -> ClaudeAgentOptions:
         allowed = list(self.config.allowed_tools)
 
+        mode = self.config.permission_mode
+        workdir = self.config.workdir
+
+        def deny_reason(name, tool_input):
+            if name not in allowed:
+                return "语音模式下不允许使用这个工具"
+            path = outside_workdir(tool_input, workdir)
+            if path:
+                return f"语音模式下只能访问工作目录里的文件，不能访问 {path}"
+            return None
+
+        async def pre_tool_use(input_data, tool_use_id, context):
+            # 每次调用工具前都会执行，不管权限模式是什么。实测 Claude Code 读工作目录外的文件、
+            # 以及 Auto 模式放行的操作都不会经过 can_use_tool，所以硬性限制放在这里
+            reason = deny_reason(input_data.get("tool_name"), input_data.get("tool_input"))
+            if reason:
+                return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                               "permissionDecision": "deny", "permissionDecisionReason": reason}}
+            return {}
+
         async def can_use_tool(name, tool_input, context):
-            # 第二道保险：工具列表之外的一律拒绝。语音场景没有人工审批。
-            if name in allowed:
-                return PermissionResultAllow()
-            return PermissionResultDeny(message="语音模式下不允许使用这个工具")
+            # Claude Code 需要人工审批时才会走到这里。语音场景没有人能点"同意"：
+            # 工具列表之外、工作目录之外的一律拒绝；Auto 模式下它自己没有直接放行的操作（只读工具除外）也拒绝
+            reason = deny_reason(name, tool_input)
+            if reason:
+                return PermissionResultDeny(message=reason)
+            if mode == "auto" and name not in READ_ONLY_TOOLS:
+                return PermissionResultDeny(message="这个操作需要人工确认，语音模式下不执行")
+            return PermissionResultAllow()
 
         kwargs = dict(
             cli_path=self.config.cli_path,
@@ -100,6 +146,8 @@ class ClaudeSession(AgentSession):
             allowed_tools=allowed,
             permission_mode=self.config.permission_mode,
             can_use_tool=can_use_tool,
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use])]},
+            strict_mcp_config=True,  # 不加载账号里的 claude.ai 连接器（Gmail、Drive 等）和其他 MCP 服务器
             include_partial_messages=True,
             setting_sources=[],  # 不加载用户的 hooks、插件等设置，行为可预期
             system_prompt={
