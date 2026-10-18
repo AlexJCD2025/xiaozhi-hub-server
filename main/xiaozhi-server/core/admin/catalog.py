@@ -1,0 +1,126 @@
+"""管理后台用到的固定清单：大模型厂商预设、EdgeTTS 中文音色、插件说明、Claude CLI 选项。"""
+
+# ---------- 大模型：API 厂商（统一走 OpenAI 兼容协议） ----------
+# entry：保存到配置里的条目名。已有的上游条目直接复用（保留用户填过的 Key），其余是新条目。
+# models：模型名的候选，第一个是默认值；页面上仍可手填其他模型。
+LLM_VENDORS = [
+    {"id": "claude", "label": "Claude", "entry": "ClaudeAPI",
+     "base_url": "https://api.anthropic.com/v1/",
+     "models": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]},
+    {"id": "openai", "label": "OpenAI", "entry": "OpenAILLM",
+     "base_url": "https://api.openai.com/v1",
+     "models": ["gpt-5-mini", "gpt-5"]},
+    {"id": "gemini", "label": "Gemini", "entry": "GeminiAPI",
+     "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+     "models": ["gemini-2.5-flash", "gemini-2.5-pro"]},
+    {"id": "deepseek", "label": "DeepSeek", "entry": "DeepSeekLLM",
+     "base_url": "https://api.deepseek.com",
+     "models": ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"]},
+    {"id": "qwen", "label": "通义千问", "entry": "AliLLM",
+     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "models": ["qwen-flash", "qwen-plus", "qwen-max"]},
+    {"id": "doubao", "label": "豆包", "entry": "DoubaoLLM",
+     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+     "models": ["doubao-seed-2-0-lite-260215"]},
+    {"id": "glm", "label": "智谱 GLM", "entry": "ChatGLMLLM",
+     "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+     "models": ["glm-4-flash", "glm-4-plus"]},
+    {"id": "kimi", "label": "Kimi", "entry": "KimiLLM",
+     "base_url": "https://api.moonshot.cn/v1",
+     "models": ["kimi-latest", "moonshot-v1-8k"]},
+    {"id": "custom", "label": "自定义", "entry": "CustomOpenAILLM",
+     "base_url": "", "models": [],
+     "hint": "其他 OpenAI 兼容服务，例如本机代理、LM Studio（http://localhost:1234/v1）、Ollama（http://localhost:11434/v1）"},
+]
+VENDOR_BY_ID = {v["id"]: v for v in LLM_VENDORS}
+VENDOR_BY_ENTRY = {v["entry"]: v for v in LLM_VENDORS}
+
+# ---------- 大模型：Claude Code CLI ----------
+CLAUDE_MODELS = [
+    {"value": "haiku", "label": "haiku（最快，适合语音）"},
+    {"value": "sonnet", "label": "sonnet（更聪明）"},
+    {"value": "opus", "label": "opus（最强，最慢）"},
+]
+CLAUDE_EFFORTS = [
+    {"value": "low", "label": "低"},
+    {"value": "medium", "label": "中"},
+    {"value": "high", "label": "高"},
+]
+CLAUDE_PERMISSION_MODES = [
+    {"value": "default", "label": "默认（只能用允许的工具）"},
+    {"value": "acceptEdits", "label": "自动接受改文件"},
+]
+CLAUDE_TOOLS = [
+    {"name": "Read", "label": "读文件", "risky": False},
+    {"name": "Grep", "label": "搜内容", "risky": False},
+    {"name": "Glob", "label": "找文件", "risky": False},
+    {"name": "WebSearch", "label": "联网搜索", "risky": False},
+    {"name": "WebFetch", "label": "打开网页", "risky": False},
+    {"name": "Bash", "label": "执行命令", "risky": True},
+    {"name": "Write", "label": "写文件", "risky": True},
+    {"name": "Edit", "label": "改文件", "risky": True},
+]
+# 主表单里的字段；其余字段放在"高级设置"里
+CLAUDE_MAIN_FIELDS = ("model", "effort", "workdir", "allowed_tools", "first_reply_filler")
+
+# ---------- 语音合成：EdgeTTS 中文音色 ----------
+EDGE_VOICES = [
+    {"value": "zh-CN-XiaoxiaoNeural", "name": "晓晓", "gender": "女", "style": "温暖", "group": "普通话"},
+    {"value": "zh-CN-XiaoyiNeural", "name": "晓伊", "gender": "女", "style": "活泼", "group": "普通话"},
+    {"value": "zh-CN-YunxiNeural", "name": "云希", "gender": "男", "style": "活泼、阳光", "group": "普通话"},
+    {"value": "zh-CN-YunxiaNeural", "name": "云夏", "gender": "男", "style": "可爱，偏童声", "group": "普通话"},
+    {"value": "zh-CN-YunjianNeural", "name": "云健", "gender": "男", "style": "激情，偏解说", "group": "普通话"},
+    {"value": "zh-CN-YunyangNeural", "name": "云扬", "gender": "男", "style": "专业稳重，偏播报", "group": "普通话"},
+    {"value": "zh-CN-liaoning-XiaobeiNeural", "name": "晓北", "gender": "女", "style": "幽默", "group": "方言：东北话"},
+    {"value": "zh-CN-shaanxi-XiaoniNeural", "name": "晓妮", "gender": "女", "style": "明亮", "group": "方言：陕西话"},
+    {"value": "zh-HK-HiuGaaiNeural", "name": "曉佳", "gender": "女", "style": "友好", "group": "粤语"},
+    {"value": "zh-HK-HiuMaanNeural", "name": "曉曼", "gender": "女", "style": "友好", "group": "粤语"},
+    {"value": "zh-HK-WanLungNeural", "name": "雲龍", "gender": "男", "style": "友好", "group": "粤语"},
+    {"value": "zh-TW-HsiaoChenNeural", "name": "曉臻", "gender": "女", "style": "友好", "group": "台湾"},
+    {"value": "zh-TW-HsiaoYuNeural", "name": "曉雨", "gender": "女", "style": "友好", "group": "台湾"},
+    {"value": "zh-TW-YunJheNeural", "name": "雲哲", "gender": "男", "style": "友好", "group": "台湾"},
+]
+EDGE_VOICE_VALUES = {v["value"] for v in EDGE_VOICES}
+VOICE_SAMPLE = {
+    "普通话": "你好，我是小智。今天想聊点什么？",
+    "粤语": "你好，我係小智。今日想傾啲乜嘢？",
+}
+
+
+def voice_sample(group: str) -> str:
+    return VOICE_SAMPLE.get(group, VOICE_SAMPLE["普通话"])
+
+
+# ---------- 意图识别：插件 ----------
+# 原项目总会加载"退出对话"和"查日期"，不需要勾选
+ALWAYS_ON_PLUGINS = [
+    {"name": "handle_exit_intent", "label": "退出对话", "desc": "说“再见”“退下吧”时结束对话"},
+    {"name": "get_lunar", "label": "查日期", "desc": "今天几号、星期几、农历和节气"},
+]
+PLUGINS = [
+    {"name": "get_weather", "label": "查天气", "desc": "实时天气和预报（使用项目共用的天气 Key，用多了可能被限制）"},
+    {"name": "get_news_from_newsnow", "label": "热点新闻", "desc": "澎湃新闻、百度热搜、财联社等热榜"},
+    {"name": "get_news_from_chinanews", "label": "中新网新闻", "desc": "中国新闻网的社会、国际、财经新闻"},
+    {"name": "play_music", "label": "放音乐", "desc": "播放电脑上 music 目录里的歌曲"},
+    {"name": "web_search", "label": "联网搜索", "desc": "需要在配置文件的 plugins.web_search 里填写搜索服务的 Key（秘塔、Tavily 等）",
+     "config": "web_search"},
+    {"name": "change_role", "label": "切换角色", "desc": "换人设和说话风格"},
+    {"name": "hass_get_state", "label": "查智能家居状态", "desc": "需要在配置文件的 plugins.home_assistant 里填写地址和令牌",
+     "config": "home_assistant"},
+    {"name": "hass_set_state", "label": "控制智能家居", "desc": "需要在配置文件的 plugins.home_assistant 里填写地址和令牌",
+     "config": "home_assistant"},
+    {"name": "hass_play_music", "label": "智能音箱放歌", "desc": "需要在配置文件的 plugins.home_assistant 里填写地址和令牌",
+     "config": "home_assistant"},
+    {"name": "search_from_ragflow", "label": "查知识库", "desc": "需要在配置文件的 plugins.search_from_ragflow 里填写 RAGFlow 地址和 Key",
+     "config": "search_from_ragflow"},
+]
+PLUGIN_NAMES = {p["name"] for p in PLUGINS}
+INTENT_MODES = ("nointent", "function_call")
+
+# ---------- 情绪（表情测试） ----------
+EMOTION_LABELS = {
+    "neutral": "平静", "happy": "开心", "laughing": "大笑", "funny": "搞笑", "sad": "难过", "angry": "生气",
+    "crying": "哭泣", "loving": "喜爱", "embarrassed": "尴尬", "surprised": "惊讶", "shocked": "震惊",
+    "thinking": "思考", "winking": "眨眼", "cool": "酷", "relaxed": "放松", "delicious": "好吃",
+    "kissy": "亲亲", "confident": "自信", "sleepy": "困", "silly": "傻乐", "confused": "困惑",
+}

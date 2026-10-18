@@ -4,10 +4,8 @@ import ctypes.util
 import shutil
 import sys
 import time
-from pathlib import Path
 
-from config.config_loader import get_project_dir
-from core.admin import config_store, deps
+from core.admin import config_store, deps, pages
 from core.utils.util import get_local_ip
 
 _cli_cache = {}  # {cli_path: (检查时间, 版本文本)}
@@ -65,17 +63,9 @@ def collect_status(config: dict, merged: dict) -> dict:
                          "；".join(lacking) + "。请用完整安装（install.sh --full）" if lacking else "所选模块的依赖均已安装"))
 
     # 语音识别模型（检查本地模型文件：FunASR 和 sherpa-onnx）
-    asr_entry = (merged.get("ASR") or {}).get(selected.get("ASR"), {})
-    model_files = {"fun_local": ("models/SenseVoiceSmall", ["model.pt"]),
-                   "sherpa_onnx_local": ("", ["model.int8.onnx", "tokens.txt"])}.get(asr_entry.get("type"))
-    if model_files:
-        model_dir = Path(get_project_dir()) / (asr_entry.get("model_dir") or model_files[0])
-        model = model_dir / model_files[1][0]
-        size = model.stat().st_size if model.exists() else 0
-        absent = [f for f in model_files[1] if not (model_dir / f).exists()]
-        checks.append(_check("语音识别模型", size > 100 * 1024 * 1024 and not absent,
-                             f"{model.name} {size // (1024 * 1024)}MB" if size and not absent
-                             else f"缺少 {model_dir / absent[0]}" if absent else f"{model} 文件不完整"))
+    model_check = pages.asr_model_check((merged.get("ASR") or {}).get(selected.get("ASR"), {}))
+    if model_check:
+        checks.append(_check("语音识别模型", model_check["ok"], model_check["detail"]))
 
     # 大模型
     llm_type = config_store.entry_type(merged, "LLM")
