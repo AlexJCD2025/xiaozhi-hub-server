@@ -1,6 +1,7 @@
 """claude_cli provider 与 Claude 会话层的单元测试。用假的 SDK 消息和假的会话，不需要真实账号。"""
 
 import asyncio
+import threading
 import time
 from types import SimpleNamespace
 
@@ -584,6 +585,34 @@ def test_stuck_turn_is_abandoned(provider):
     while not FakeAgent.instances[0].closed and time.time() < deadline:
         time.sleep(0.05)
     assert FakeAgent.instances[0].closed  # 卡死的进程被强制关闭，下一轮会重新启动
+
+
+def test_abort_closes_stuck_turn(provider):
+    FakeAgent.delay = 5          # 设备打断后 interrupt 无效：这一轮一直不结束
+    provider.filler = ""
+    c = conn()
+    provider.on_conn_open(c)
+    threading.Thread(target=run, args=(provider, c, "你好"), daemon=True).start()
+    st = provider._states[c.session_id]
+    deadline = time.time() + 2
+    while not (st.agent and st.lock and st.lock.locked()) and time.time() < deadline:
+        time.sleep(0.05)
+    provider.abort(c)
+    agent = FakeAgent.instances[0]
+    deadline = time.time() + 2
+    while not agent.closed and time.time() < deadline:
+        time.sleep(0.05)
+    assert agent.interrupts == 1 and agent.closed
+
+
+def test_abort_after_turn_keeps_process(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    provider.abort(c)
+    time.sleep(0.3)
+    agent = FakeAgent.instances[0]
+    assert agent.interrupts == 1 and not agent.closed  # 这一轮已经结束，不该关进程
 
 
 class ErrorClient(FakeClient):
