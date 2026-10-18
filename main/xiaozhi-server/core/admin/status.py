@@ -53,9 +53,10 @@ def collect_status(config: dict, merged: dict) -> dict:
         opus_ok, opus = False, f"{opus or ''} 加载失败: {e}"
     checks.append(_check("opus", opus_ok, opus or "已加载"))
 
-    # 所选模块需要的 Python 包（精简安装时，部分模块的依赖没有安装）
+    # 所选模块需要的 Python 包（精简安装时，部分模块的依赖没有安装）。
+    # 后台不管理的 VAD、Memory、VLLM 也要查：手动改了配置时，服务会在启动时才报错
     lacking = []
-    for section in config_store.SECTIONS:
+    for section in (*config_store.SECTIONS, "VAD", "Memory", "VLLM"):
         name = selected.get(section)
         missing = deps.missing_packages(section, config_store.entry_type(merged, section)) if name else ()
         if missing:

@@ -161,13 +161,16 @@ PYEOF
   info "已生成：$CONFIG"
 fi
 
-# 精简安装没有 FunASR：之前完整安装时选了 FunASR 的配置，切换到 SherpaASR（同一个 SenseVoice 模型）
+# 精简安装没有 FunASR：之前完整安装时选了 FunASR 的配置，切换到 SherpaASR（同一个 SenseVoice 模型）。
+# 虚拟环境里还留着 funasr 时 FunASR 仍能用，只提示不询问
 if (( ! FULL )) && [[ "$(cd "$SERVER" && "$PY" - <<'PYEOF' 2>/dev/null
 from core.admin import config_store
 print(config_store.entry_type(config_store.load_merged(), "ASR"))
 PYEOF
 )" == "fun_local" ]]; then
-  if ask "当前配置的语音识别是 FunASR，精简安装不包含它。切换到 SherpaASR（同一个 SenseVoice 模型，内存约减半）？" Y; then
+  if "$PY" -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("funasr") else 1)' 2>/dev/null; then
+    info "当前语音识别是 FunASR（仍可使用）。改用 SherpaASR 识别准确率相当、内存约减半，可在管理后台的「语音识别」页切换"
+  elif ask "当前配置的语音识别是 FunASR，但精简安装没有安装它。切换到 SherpaASR（同一个 SenseVoice 模型）？" Y; then
     (cd "$SERVER" && "$PY" -c 'from core.admin import config_store; config_store.select_entry("ASR", "SherpaASR", config_store.load_merged())' 2>/dev/null) \
       && info "语音识别已切换为 SherpaASR" || info "切换失败，请在管理后台的「语音识别」页切换"
   else
