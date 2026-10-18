@@ -892,7 +892,7 @@ async function renderCallNames(root) {
     <div class="card panel">
       <label class="switch" style="margin-top:0"><input type="checkbox" id="cn-enabled" ${d.enabled ? "checked" : ""}><span>开启呼名</span>
         <small>关闭后，“嗨 + 称呼”会当作普通的话交给当前模型</small></label>
-      <label class="f" style="margin-top:16px">只说称呼时的回复<span class="hint">只说“嗨 + 称呼”时，服务端切换模型后直接回这句，不启动模型</span>
+      <label class="f" style="margin-top:16px">只说称呼时的回复<span class="hint">只说“嗨 + 称呼”时，服务端切换模型后直接回这句，不启动模型。越短越快，中间的标点会去掉、一次播完</span>
         <input class="in" id="cn-reply" value="${esc(d.reply)}" maxlength="40"></label>
       <p class="muted small" style="margin:12px 0 0">语音识别常把称呼听成别的写法（比如 Claude 会听成 cloud），每种写法都要列出来。开头的“${esc(d.prefixes.join(" / "))}”不用写。设备第一次连上时用后台默认的模型（${esc(labelOf(d.default) || d.default || "未设置")}），之后记住每台设备上次叫的模型。</p>
     </div>

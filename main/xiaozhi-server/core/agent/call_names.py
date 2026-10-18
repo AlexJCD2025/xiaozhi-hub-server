@@ -22,7 +22,12 @@ if TYPE_CHECKING:
 TAG = __name__
 
 DEFAULT_MODELS = {"ClaudeCLI": ["claude", "cloud", "clod", "clot", "克劳德"]}
-DEFAULT_REPLY = "我在，请说"
+DEFAULT_REPLY = "我在"
+
+
+def one_segment(text: str) -> str:
+    """把回复整理成 TTS 只合成一段的形式：句中的标点会把一句话切成几段、逐段合成播放，听起来拖沓。"""
+    return re.sub(r"\s+", " ", re.sub(r"[，,、~～；;：:。.！!？?]+", " ", text or "")).strip()
 
 # "嘿"常被识别成 he，有时后面还带一个日文假名（实测 "He cloud."、"Heい cloud。"）
 _PREFIXES = ["hiigh", "high", "hey", "hei", "hai", "hi", "he", "嗨", "嘿"]
@@ -132,10 +137,31 @@ class Learner:
 learner = Learner()
 
 
-async def _speak(conn: "ConnectionHandler", heard: str, reply: str) -> bool:
-    """不经过大模型，直接回一句话。TTS 还没就绪时返回 False。"""
+# 固定回复合成好的音频：(TTS 类型, 音色, 采样率, 文字) -> opus 包。EdgeTTS 合成一句要 2 秒左右，缓存后直接发
+_audio_cache = {}
+
+
+def _cache_key(conn: "ConnectionHandler", text: str):
+    return (type(conn.tts).__name__, getattr(conn.tts, "voice", None), getattr(conn, "sample_rate", None), text)
+
+
+async def _fill_cache(conn: "ConnectionHandler", text: str) -> None:
+    try:
+        packets = await asyncio.to_thread(conn.tts.to_tts, text)
+        if packets:
+            _audio_cache[_cache_key(conn, text)] = packets
+    except Exception as e:
+        conn.logger.bind(tag=TAG).warning(f"缓存呼名回复的音频失败: {e}")
+
+
+async def _speak(conn: "ConnectionHandler", heard: str, reply: str, cache: bool = False) -> bool:
+    """不经过大模型，直接回一句话。TTS 还没就绪时返回 False。
+
+    cache=True 用于固定的回复：第一次照常合成，同时在后台把音频缓存起来，之后直接发缓存的音频。
+    """
     from core.handle.intentHandler import speak_txt
-    from core.handle.sendAudioHandle import send_stt_message
+    from core.handle.sendAudioHandle import sendAudioMessage, send_stt_message
+    from core.providers.tts.dto.dto import SentenceType
     from core.utils.dialogue import Message
 
     # 刚连上时 TTS 可能还在初始化（和唤醒词回复一样，最多等 3 秒）
@@ -148,7 +174,16 @@ async def _speak(conn: "ConnectionHandler", heard: str, reply: str) -> bool:
     conn.client_abort = False
     conn.sentence_id = str(uuid.uuid4().hex)
     conn.dialogue.put(Message(role="user", content=heard))
+    packets = _audio_cache.get(_cache_key(conn, reply)) if cache else None
+    if packets:
+        # 和唤醒词回复的播放方式一样
+        await sendAudioMessage(conn, SentenceType.FIRST, packets, reply)
+        await sendAudioMessage(conn, SentenceType.LAST, [], None)
+        conn.dialogue.put(Message(role="assistant", content=reply))
+        return True
     speak_txt(conn, reply)
+    if cache:
+        asyncio.create_task(_fill_cache(conn, reply))
     return True
 
 
@@ -196,8 +231,8 @@ async def handle_call_name(conn: "ConnectionHandler", text: str):
         conn.logger.bind(tag=TAG).info(f"呼名 {model}：去掉称呼后交给模型：{rest}")
         return rest
 
-    reply = cfg.get("reply") or DEFAULT_REPLY
-    if not await _speak(conn, text, reply):
+    reply = one_segment(cfg.get("reply") or "") or DEFAULT_REPLY
+    if not await _speak(conn, text, reply, cache=True):
         conn.logger.bind(tag=TAG).warning("呼名：TTS 尚未就绪，无法回复，按普通对话处理")
         return text
     conn.logger.bind(tag=TAG).info(f"呼名 {model}：只有称呼，直接回复：{reply}")
