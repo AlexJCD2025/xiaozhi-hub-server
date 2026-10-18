@@ -1,13 +1,12 @@
 # xiaozhi-hub-server 精简安装的依赖清单（默认安装方式）
 # 只写包名、不写版本：安装时用原项目的 requirements.txt 做版本约束，同步上游后自动跟上它锁定的版本。
 # 只包含默认组合（SileroVAD + SherpaASR + EdgeTTS + ClaudeCLI/OpenAI 兼容接口 + nointent）需要的包。
-# 需要 FunASR、mem0、阿里云 / 百度 / Coze 等其他模块时，用完整安装：install.sh --full
+# 手动改配置选用其他模块（如 FunASR、mem0、阿里云 / 百度 / Coze）时，需要自行补装它们的依赖。
 
 # 服务端核心
 numpy
 websockets
 aiohttp
-aiohttp_cors
 httpx
 requests
 PySocks
@@ -15,9 +14,7 @@ pyyml
 ruamel.yaml
 loguru
 aioconsole
-psutil
 portalocker
-ormsgpack
 Jinja2
 PyJWT
 mcp

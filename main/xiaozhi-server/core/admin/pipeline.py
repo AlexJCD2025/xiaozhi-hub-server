@@ -22,8 +22,6 @@ VAR_LABELS = {
     "today_date": "日期",
     "today_weekday": "星期",
     "lunar_date": "农历",
-    "local_address": "位置",
-    "weather_info": "天气",
     "emojiList": "表情列表",
     "dynamic_context": "动态上下文",
     "language": "回复语言",
@@ -51,7 +49,7 @@ def _entry(merged: dict, section: str) -> tuple:
 
 
 def _online_conn():
-    """任意一台在线设备的连接（用来取它实际使用的提示词和位置）。"""
+    """任意一台在线设备的连接（用来取它实际使用的提示词）。"""
     for item in connections.snapshot():
         conn = connections.get(item["session_id"])
         if conn is not None:
@@ -107,7 +105,7 @@ def describe_flow(merged: dict) -> dict:
         },
         {
             "id": "asr", "title": "语音识别", "module": asr_name, "icon": "📝",
-            "summary": "本地识别，不联网" if asr.get("type") in ("sherpa_onnx_local", "fun_local") else "云端识别",
+            "summary": "本地识别，不联网" if asr.get("type") == "sherpa_onnx_local" else "云端识别",
             "params": [
                 {"label": "模型", "value": f"{asr.get('type', asr_name)} · {asr.get('model_dir') or '云端服务'}"},
                 {"label": "结果", "value": "识别出的文字去掉首尾标点后，先发给设备显示（stt 消息），再进入下一步"},
@@ -223,40 +221,29 @@ def _template_text(merged: dict) -> str:
         return ""
 
 
-def _context_values(merged: dict, conn) -> dict:
+def _context_values(merged: dict) -> dict:
     from core.utils.current_time import get_current_date, get_current_lunar_date, get_current_weekday
     from core.utils.prompt_manager import EMOJI_List
 
     _, tts = _entry(merged, "TTS")
-    location = weather = ""
-    if conn is not None:
-        try:
-            from core.utils.cache.manager import CacheType, cache_manager
-
-            location = cache_manager.get(CacheType.LOCATION, getattr(conn, "client_ip", "")) or ""
-            weather = cache_manager.get(CacheType.WEATHER, location) or "" if location else ""
-        except Exception:
-            pass
     return {
         "current_time": datetime.now().strftime("%H:%M"),
         "today_date": get_current_date(),
         "today_weekday": get_current_weekday(),
         "lunar_date": get_current_lunar_date(),
-        "local_address": location or "（设备连接时按 IP 查询城市；局域网 IP 查不到时为空）",
-        "weather_info": weather or "（设备连接时按城市查询未来几天天气）",
         "emojiList": EMOJI_List,
         "dynamic_context": "",
         "language": tts.get("language") or "中文",
     }
 
 
-def render_base_prompt(merged: dict, conn=None) -> str:
-    """按原项目的方式渲染基础模板，变量值用标记包起来。"""
+def render_base_prompt(merged: dict) -> str:
+    """按服务端的方式渲染基础模板，变量值用标记包起来。"""
     template = _template_text(merged)
     persona = str(merged.get("prompt") or "")
     if not template:
         return _mark("base_prompt", persona)
-    values = _context_values(merged, conn)
+    values = _context_values(merged)
     marked = {k: _mark(k, v) for k, v in values.items()}
     return Template(template).render(base_prompt=_mark("base_prompt", persona), emoji_enabled=True,
                                      device_id="", client_ip="", **marked)
@@ -267,7 +254,7 @@ def describe_prompt(merged: dict) -> dict:
     _, intent = _entry(merged, "Intent")
     is_cli = llm.get("type") == "claude_cli"
     conn = _online_conn()
-    base = render_base_prompt(merged, conn)
+    base = render_base_prompt(merged)
 
     segments = []
     if is_cli:
@@ -278,7 +265,7 @@ def describe_prompt(merged: dict) -> dict:
                     "这段由 Claude Code 程序自己生成，不在我们的配置里，这里无法显示原文。我们的内容追加在它后面。",
         })
     segments.append({
-        "id": "base", "title": "基础模板（含人设）", "source": "我们", "when":
+        "id": "base", "title": "基础模板（含人设）", "source": "服务端", "when":
             "设备连接时生成；Claude 进程启动时固定" if is_cli else "设备连接时生成；当前时间每轮更新",
         "text": base, "collapsed": False,
         "note": f"来自 {_template_name(merged)}。高亮的部分是填进去的值：人设来自配置里的 prompt，"
@@ -289,39 +276,41 @@ def describe_prompt(merged: dict) -> dict:
         from core.providers.llm.claude_cli.claude_cli import VOICE_RULES
 
         segments.append({
-            "id": "voice_rules", "title": "语音规则", "source": "我们", "when": "进程启动时",
+            "id": "voice_rules", "title": "语音规则", "source": "服务端", "when": "进程启动时",
             "text": VOICE_RULES.strip(), "collapsed": False,
             "note": "我们为 Claude Code 加的规则：开头一个 emoji、简短口语、不用 Markdown。写在 claude_cli.py 的 VOICE_RULES。",
         })
         segments.append({
-            "id": "turn", "title": "每轮发送的内容", "source": "原项目", "when": "每轮",
-            "text": "（这一轮识别出的文字，例如：明天上海会下雨吗）", "collapsed": False,
+            "id": "turn", "title": "每轮发送的内容", "source": "服务端", "when": "每轮",
+            "text": "（这一轮识别出的文字，例如：帮我看看工作目录里有哪些文件）", "collapsed": False,
             "note": "只发这一轮的话，之前的对话保存在 Claude Code 会话里。第一次识别到说话人时，会发 "
                     "{\"speaker\": \"名字\", \"content\": \"文字\"} 这样的 JSON（声纹识别目前没开）。",
         })
     else:
         if intent.get("type") == "function_call":
             segments.append({
-                "id": "fewshot", "title": "工具调用示例", "source": "原项目", "when": "每轮",
+                "id": "fewshot", "title": "工具调用示例", "source": "服务端", "when": "每轮",
                 "text": "\n".join(f"[{m['role']}] {m['content']}" for m in DIRECT_ANSWER_FEWSHOT), "collapsed": True,
                 "note": "插在系统提示词后面的几条示范对话，教模型什么时候直接回答、什么时候调用工具。不会显示给用户。",
             })
             plugins = [p["label"] for p in catalog.PLUGINS if p["name"] in (intent.get("functions") or [])]
             segments.append({
-                "id": "tools", "title": "工具清单", "source": "原项目", "when": "每轮",
+                "id": "tools", "title": "工具清单", "source": "服务端", "when": "每轮",
                 "text": "、".join(["直接回答（direct_answer）", *[p["label"] for p in catalog.ALWAYS_ON_PLUGINS], *plugins]),
                 "collapsed": False,
                 "note": "随请求一起发给模型的工具（OpenAI 协议的 tools 参数），每个工具带名字、用途和参数说明。",
             })
         segments.append({
-            "id": "history", "title": "历史对话 + 这一轮的话", "source": "原项目", "when": "每轮",
+            "id": "history", "title": "历史对话 + 这一轮的话", "source": "服务端", "when": "每轮",
             "text": "[user] 上一轮说的话\n[assistant] 上一轮的回复\n……\n[user] 这一轮识别出的文字", "collapsed": False,
             "note": "每轮都把这次连接以来的全部对话一起发送，没有截断；设备断开后清空（没有开启记忆）。",
         })
 
     warnings = []
     if is_cli:
-        warnings.append("提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 5 分钟才关闭）里面的日期、时间不会更新。")
+        idle = int(llm.get("idle_timeout_seconds") or 300)
+        idle_text = f"{idle // 60} 分钟" if idle % 60 == 0 else f"{idle} 秒"
+        warnings.append(f"提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 {idle_text}才关闭）里面的日期、时间不会更新。")
 
     actual = _system_prompt_of(conn) if conn is not None else ""
     return {

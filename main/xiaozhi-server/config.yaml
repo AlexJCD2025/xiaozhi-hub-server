@@ -226,11 +226,14 @@ prompt: |
 prompt_template: hub-base-prompt.txt
 
 # 系统错误时的回复
-system_error_response: "主人，小智现在有点忙，我们稍后再试吧。"
+# [xiaozhi-hub] 原为"主人，小智现在有点忙，我们稍后再试吧。"，和中性人设保持一致
+system_error_response: "现在有点忙，我们稍后再试吧。"
 
 # 结束语prompt
 end_prompt:
   enable: true # 是否开启结束语
+  # [xiaozhi-hub] 固定告别语：填写后直接说这句再断开，不再让大模型按下面的 prompt 生成
+  reply: 好一会儿没听到你说话，我先休息啦，有事再叫我。
   # 结束语
   prompt: |
     请你以"时间过得真快"未来头，用富有感情、依依不舍的话来结束这场对话吧！

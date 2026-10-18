@@ -85,7 +85,7 @@
   .seg button { padding: 5px 18px; border-radius: 6px; color: var(--muted); cursor: pointer; border: 0; background: none; }
   .seg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); font-weight: 500; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; background: var(--card); }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; background: var(--card); }
   .chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
   .chip.risky { border-style: dashed; }
   .chip.risky.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
@@ -504,7 +504,7 @@ function renderDevices(dev) {
     const refresh = async () => { box.dataset.key = ""; renderDevices(await api("devices")); };
     act("toggle").onclick = () => { openEmotion.has(sid) ? openEmotion.delete(sid) : openEmotion.add(sid); refresh(); };
     if (act("all")) act("all").onclick = (e) => busy(e.target, async () => {
-      try { await api(url + "emotion-test", { interval: 2 }); await refresh(); } catch (err) { toast(err.message, true); } });
+      try { await api(url + "emotion-test", {}); await refresh(); } catch (err) { toast(err.message, true); } });
     if (act("stop")) act("stop").onclick = (e) => busy(e.target, async () => {
       try { await api(url + "emotion-test/stop", {}); await refresh(); } catch (err) { toast(err.message, true); } });
     el.querySelectorAll("[data-emo]").forEach((b) => (b.onclick = async () => {
@@ -516,7 +516,7 @@ function renderDevices(dev) {
 
 // ---------- 工作原理 ----------
 
-const SOURCE_PILL = { "原项目": "", "我们": "ok", "Claude Code": "warn" };
+const SOURCE_PILL = { "服务端": "ok", "Claude Code": "warn" };
 let howStage = "llm";
 async function renderHow(root) {
   const d = await api("pipeline");
@@ -529,7 +529,7 @@ async function renderHow(root) {
   });
   const plain = (text) => text.replace(markRe, (_, name, value) => value);
   root.innerHTML = `
-    <div class="page-head"><div><h1>工作原理</h1><p class="sub">对设备说一句话之后，服务端每一步做了什么。内容按当前配置生成，切换模块后会跟着变。</p></div></div>
+    <div class="page-head"><div><h1>工作原理</h1><p class="sub">对设备说一句话之后，服务端每一步做了什么。内容按当前配置生成，修改设置后会跟着变。</p></div></div>
     <div class="section-title">一句话的旅程 <span class="muted small" style="font-weight:400">点每一步看细节</span></div>
     <div class="flow">${f.stages.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}
       <button class="stage ${s.id === howStage ? "on" : ""}" data-stage="${s.id}">
@@ -688,14 +688,14 @@ async function renderLLM(root) {
     $("cli-save").onclick = (e) => busy(e.target, async () => {
       try {
         const r = await api("llm/claude", cliValues());
-        toast(r.changed.length ? r.note : "没有修改"); page.dirty = null; await openPage("llm", true);
+        toast(r.changed.length ? r.note : "没有修改", r.failed); page.dirty = null; await openPage("llm", true);
       } catch (err) { result(`<span style="color:var(--err)">${esc(err.message)}</span>`); }
     });
     if ($("cli-use")) $("cli-use").onclick = (e) => busy(e.target, async () => {
       try {
         await api("llm/claude", cliValues());
         const r = await api("llm/use", { kind: "cli" });
-        toast(r.note); page.dirty = null; await openPage("llm", true);
+        toast(r.note, r.failed); page.dirty = null; await openPage("llm", true);
       } catch (err) { result(`<span style="color:var(--err)">${esc(err.message)}</span>`); }
     });
   }
@@ -735,14 +735,14 @@ async function renderLLM(root) {
       catch (err) { bad(err.message); }
     });
     $("api-save").onclick = (e) => busy(e.target, async () => {
-      try { const r = await api(`llm/vendors/${x.id}`, values()); toast(r.changed.length ? r.note : "没有修改"); page.dirty = null; await openPage("llm", true); }
+      try { const r = await api(`llm/vendors/${x.id}`, values()); toast(r.changed.length ? r.note : "没有修改", r.failed); page.dirty = null; await openPage("llm", true); }
       catch (err) { bad(err.message); }
     });
     if ($("api-use")) $("api-use").onclick = (e) => busy(e.target, async () => {
       try {
         await api(`llm/vendors/${x.id}`, values());
         const r = await api("llm/use", { kind: "api", vendor: x.id });
-        toast(r.note); page.dirty = null; await openPage("llm", true);
+        toast(r.note, r.failed); page.dirty = null; await openPage("llm", true);
       } catch (err) { bad(err.message); }
     });
   };
@@ -820,7 +820,7 @@ async function renderTTS(root) {
   }));
   page.dirty = () => chosen !== d.voice;
   $("tts-save").onclick = (e) => busy(e.target, async () => {
-    try { const r = await api("tts", { voice: chosen }); toast(r.changed.length ? r.note : "没有修改"); page.dirty = null; await openPage("tts", true); }
+    try { const r = await api("tts", { voice: chosen }); toast(r.changed.length ? r.note : "没有修改", r.failed); page.dirty = null; await openPage("tts", true); }
     catch (err) { toast(err.message, true); }
   });
 }
@@ -869,7 +869,7 @@ async function renderIntent(root) {
   sync();
   page.dirty = snapshot(values);
   $("intent-save").onclick = (e) => busy(e.target, async () => {
-    try { const r = await api("intent", values()); toast(r.note); page.dirty = null; await openPage("intent", true); }
+    try { const r = await api("intent", values()); toast(r.note, r.failed); page.dirty = null; await openPage("intent", true); }
     catch (err) { toast(err.message, true); }
   });
 }

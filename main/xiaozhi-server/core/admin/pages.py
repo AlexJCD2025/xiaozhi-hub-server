@@ -100,7 +100,6 @@ def describe_claude_cli(merged: dict) -> dict:
         elif kind == "list":
             values[name] = [str(v) for v in value or []]
     return {
-        "entry": CLAUDE_CLI_ENTRY,
         "exists": entry.get("type") == "claude_cli",
         "values": values,
         "level": claude_level(entry),
@@ -108,7 +107,7 @@ def describe_claude_cli(merged: dict) -> dict:
         "options": {
             "model": catalog.CLAUDE_MODELS,
             "effort": catalog.CLAUDE_EFFORTS,
-            "level": [{k: lv[k] for k in ("value", "label", "desc", "mode", "tools")} for lv in catalog.CLAUDE_LEVELS],
+            "level": [{k: lv[k] for k in ("value", "label", "desc")} for lv in catalog.CLAUDE_LEVELS],
             "tools": catalog.CLAUDE_TOOLS,
         },
     }
@@ -288,7 +287,6 @@ def describe_asr(merged: dict) -> dict:
         info.append({"label": "模型类型", "value": str(entry["model_type"])})
     return {
         "selected": name,
-        "type": entry.get("type", name),
         "label": ASR_LABELS.get(entry.get("type"), "云端或其他识别服务"),
         "info": info,
         "model": asr_model_check(entry),

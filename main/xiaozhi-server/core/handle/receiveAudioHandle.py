@@ -1,5 +1,6 @@
 import time
 import json
+import uuid
 import asyncio
 from typing import TYPE_CHECKING
 
@@ -8,7 +9,7 @@ if TYPE_CHECKING:
 from core.utils.util import audio_to_data
 from core.agent.call_names import handle_call_name
 from core.handle.abortHandle import handleAbortMessage
-from core.handle.intentHandler import handle_user_intent
+from core.handle.intentHandler import handle_user_intent, speak_txt
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 
@@ -133,6 +134,13 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
             if end_prompt and end_prompt.get("enable", True) is False:
                 conn.logger.bind(tag=TAG).info("结束对话，无需发送结束提示语")
                 await conn.close()
+                return
+            # [xiaozhi-hub] 配置了固定告别语（end_prompt.reply）时直接说这句再断开，不发给大模型：
+            # 接 Claude Code 时，"请你以时间过得真快开头……"这句假的用户消息会被永久写进对话记录
+            farewell = end_prompt.get("reply")
+            if farewell:
+                conn.sentence_id = uuid.uuid4().hex
+                speak_txt(conn, farewell)
                 return
             prompt = end_prompt.get("prompt")
             if not prompt:

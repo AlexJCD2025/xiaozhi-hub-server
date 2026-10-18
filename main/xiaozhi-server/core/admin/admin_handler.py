@@ -572,8 +572,9 @@ class AdminHandler:
         self._emotion_runs = {sid: r for sid, r in self._emotion_runs.items() if connections.get(sid) is not None}
         self._emotion_runs[session_id] = run
         self.logger.bind(tag=TAG).info(f"开始表情测试：设备 {conn.device_id}，共 {len(sequence)} 种，间隔 {interval} 秒")
-        return self._json({"ok": True, "total": len(sequence)})
+        return self._json({"ok": True})
 
     async def handle_emotion_stop(self, request: web.Request):
         self._require_login(request)
-        return self._json({"ok": True, "stopped": self._stop_emotion_test(request.match_info["session_id"])})
+        self._stop_emotion_test(request.match_info["session_id"])
+        return self._json({"ok": True})
