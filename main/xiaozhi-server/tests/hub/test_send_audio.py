@@ -1,4 +1,4 @@
-"""[xiaozhi-hub] 音频下发的预缓冲逻辑：每轮开头、设备缓冲快播空时各预缓冲一次，结束时按剩余缓冲等待。"""
+"""[xiaozhi-hub] 音频下发的预缓冲逻辑：队列发空时把设备缓冲补到 N 包（每轮开头、每句开头），结束时按剩余缓冲等待。"""
 
 import time
 from types import SimpleNamespace
@@ -67,13 +67,32 @@ async def test_reburst_when_device_buffer_drained(conn):
     assert len(queued) == 15
 
 
-async def test_no_extra_burst_while_device_still_buffered(conn):
+async def test_top_up_to_n_when_next_sentence_arrives_early(conn):
     rc, fc, queued = controller(conn)
     await h._send_audio_with_rate_control(conn, frames(10), rc, fc, 0)
-    # 设备里还有约 0.6 秒没播完，下一句紧接着到达：不重新预缓冲，避免缓冲越积越多
+    # 设备里还有约 0.6 秒（10 包）没播完，下一句紧接着到达：只补 5 包到 15 包，缓冲不会越积越多
     await h._send_audio_with_rate_control(conn, frames(20), rc, fc, 0)
-    assert len(conn.websocket.sent) == 15  # 只补完第一次预缓冲剩余的 5 包
+    assert len(conn.websocket.sent) == 15
     assert len(queued) == 15
+
+
+async def test_top_up_when_device_buffer_low_but_not_empty(conn):
+    rc, fc, queued = controller(conn)
+    await h._send_audio_with_rate_control(conn, frames(30), rc, fc, 0)
+    queued.clear()
+    # 上一句发完后，设备只剩约 0.24 秒（4 包）：补 11 包，整句播放期间都保持约 15 包余量。
+    # 旧逻辑只在快播空（不到 1 包）时才补，这一句会只剩 0.24 秒余量，Wi-Fi 一抖就断续
+    fc["play_end"] = time.monotonic() + 4 * 0.06
+    await h._send_audio_with_rate_control(conn, frames(30), rc, fc, 0)
+    assert len(conn.websocket.sent) == 15 + 11
+    assert len(queued) == 19
+
+
+async def test_no_burst_when_device_already_full(conn):
+    rc, fc, queued = controller(conn)
+    fc["play_end"] = time.monotonic() + 20 * 0.06  # 设备里已经有 20 包，超过设定的 15 包
+    await h._send_audio_with_rate_control(conn, frames(10), rc, fc, 0)
+    assert not conn.websocket.sent and len(queued) == 10
 
 
 async def test_play_end_tracks_sent_audio(conn):

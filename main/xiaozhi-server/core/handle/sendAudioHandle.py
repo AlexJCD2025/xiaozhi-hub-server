@@ -263,15 +263,15 @@ async def _send_audio_with_rate_control(
             rate_controller.add_audio(packet)
         else:
             # 默认节奏模式（60ms/包）：前 N 包预缓冲直接发，后续入队由后台任务按 interval_ms 节奏发
-            # [xiaozhi-hub] 设备缓冲快播空时（每轮开头，或上一句发完、下一句才合成好）先直接发 N 包预缓冲，
-            # 否则第一句之后设备缓冲一直接近 0，Wi-Fi 稍有抖动就会断断续续。
+            # [xiaozhi-hub] 队列发空时（每轮开头，或上一句发完、下一句才到），先直接补发音频，
+            # 把设备缓冲补到 N 包，之后再按节奏发：整句话播放期间设备始终领先约 N 包，能扛住 Wi-Fi 抖动。
+            # 只补到 N、不在已有缓冲上再加 N，缓冲不会越积越多。
+            # 不能只在快播空时才补：下一句在上一句还剩 0.2 秒时到达，整句就只剩 0.2 秒余量，很容易断续。
             # play_end 是估算的设备播完时间，由 _do_send_audio 在每次发送后更新。
             if not rate_controller.queue:
-                ahead = flow_control.get("play_end", 0) - time.monotonic()
-                burst_left = flow_control.get("burst_left", 0)
-                # 没有进行中的预缓冲且设备快播完；或者设备已经播空（上一句的预缓冲没用完也重新来一次）
-                if (burst_left == 0 and ahead < AUDIO_FRAME_DURATION / 1000.0) or ahead < 0:
-                    flow_control["burst_left"] = _pre_buffer_count(conn)
+                ahead = max(flow_control.get("play_end", 0) - time.monotonic(), 0)
+                buffered = round(ahead * 1000 / AUDIO_FRAME_DURATION)
+                flow_control["burst_left"] = max(_pre_buffer_count(conn) - buffered, 0)
             if flow_control.get("burst_left", 0) > 0:
                 flow_control["burst_left"] -= 1
                 await _do_send_audio(conn, packet, flow_control)
