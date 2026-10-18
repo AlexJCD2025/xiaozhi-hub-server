@@ -258,8 +258,7 @@ def desired_intent(merged: dict, llm_name: str, path: Path = None):
 
 def asr_model_check(asr_entry: dict):
     """本地 ASR 的模型文件检查；不是本地模型时返回 None。"""
-    model_files = {"fun_local": ("models/SenseVoiceSmall", ["model.pt"]),
-                   "sherpa_onnx_local": ("", ["model.int8.onnx", "tokens.txt"])}.get(asr_entry.get("type"))
+    model_files = {"sherpa_onnx_local": ("", ["model.int8.onnx", "tokens.txt"])}.get(asr_entry.get("type"))
     if not model_files:
         return None
     model_dir = Path(get_project_dir()) / (asr_entry.get("model_dir") or model_files[0])
@@ -278,7 +277,6 @@ def asr_model_check(asr_entry: dict):
 
 ASR_LABELS = {
     "sherpa_onnx_local": "本地识别 · SenseVoice（sherpa-onnx），不需要联网",
-    "fun_local": "本地识别 · SenseVoice（FunASR），不需要联网",
 }
 
 

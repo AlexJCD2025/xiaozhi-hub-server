@@ -18,7 +18,7 @@ from pathlib import Path
 from aiohttp import web
 
 from config.logger import setup_logging
-from core.admin import auth, catalog, config_store, connections, deps, pages, pipeline
+from core.admin import auth, catalog, config_store, connections, pages, pipeline
 from core.admin.status import _claude_version, collect_status
 from core.utils.modules_initialize import initialize_modules
 from core.utils.textUtils import EMOJI_MAP
@@ -202,10 +202,6 @@ class AdminHandler:
         merged = await self._blocking(self._merged)
         if name not in (merged.get(section) or {}):
             raise KeyError(name)
-        missing = await self._blocking(deps.missing_packages, section, config_store.entry_type(merged, section, name))
-        if missing:
-            return {"ok": False, "applied": False,
-                    "note": f"{name} 需要的 Python 包没有安装（{', '.join(missing)}），请先用完整安装（install.sh --full）"}
         old = (merged.get("selected_module") or {}).get(section)
         if old == name and self._running(section) == name and \
                 (self.config.get(section) or {}).get(name) == merged[section][name]:
