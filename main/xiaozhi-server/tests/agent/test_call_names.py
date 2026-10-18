@@ -32,6 +32,8 @@ def test_call_name_with_content(asr_text, rest):
     "嗨,你怎么看？",                  # Grok 被吞掉，按没有称呼处理
     "Hi, Koex.",                      # Codex 暂不支持
     "嗨 cloudflare 怎么配置",          # 称呼后面紧跟字母，不是称呼
+    "嗨cloud code现在是什么版本？",     # 问的是 Claude Code，不是在叫 Claude
+    "嗨 Claude Code 怎么安装",
     "今天嗨 cloud 一下",               # 不在句首
     "",
 ])
@@ -43,6 +45,12 @@ def test_custom_models():
     models = {"grok": ["格罗克"]}
     assert match_call_name("嗨 格罗克，你怎么看", models) == ("grok", "你怎么看")
     assert match_call_name("嗨 cloud", models) is None
+
+
+def test_alias_written_as_string():
+    models = {"claude": "cloud"}  # 配置里写成字符串而不是列表
+    assert match_call_name("嗨 cloud", models) == ("claude", "")
+    assert match_call_name("嗨 do 一下", models) is None  # 不能拆成单个字符去匹配
 
 
 conn_messages = []

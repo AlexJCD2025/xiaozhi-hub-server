@@ -26,18 +26,28 @@ _SEP = r"[\s,，.。!！?？、~～]*"
 
 
 def _alias_pattern(alias: str) -> str:
-    # 英文别名后面不能紧跟字母，避免"cloudflare"这类词被当成称呼
-    return re.escape(alias) + (r"(?![a-z])" if alias[-1:].isascii() and alias[-1:].isalpha() else "")
+    # 称呼后面不能紧跟（或隔着空格跟）英文字母：避免"cloudflare"、"Claude Code 怎么用"被当成称呼。
+    # 中文句子里称呼后面通常是标点或中文；"Hi Claude what's up"这种不带逗号的英文句子会原样交给模型
+    return re.escape(alias) + r"(?!\s*[a-z])"
+
+
+def _aliases(value) -> list:
+    """配置里的别名应是列表；写成单个字符串时当作一个别名，不能拆成单个字符。"""
+    if isinstance(value, str):
+        value = [value]
+    return [str(a).strip().lower() for a in (value or []) if str(a).strip()]
 
 
 def _build(models: dict) -> list:
     prefix = "(?:" + "|".join(_PREFIXES) + ")"
-    return [
-        (model, re.compile(r"^" + _SEP + prefix + _SEP + "(?:" +
-                           "|".join(_alias_pattern(a.lower()) for a in sorted(aliases, key=len, reverse=True)) +
-                           ")" + _SEP, re.IGNORECASE))
-        for model, aliases in models.items() if aliases
-    ]
+    result = []
+    for model, value in models.items():
+        aliases = _aliases(value)
+        if aliases:
+            alternatives = "|".join(_alias_pattern(a) for a in sorted(aliases, key=len, reverse=True))
+            result.append((model, re.compile(r"^" + _SEP + prefix + _SEP + "(?:" + alternatives + ")" + _SEP,
+                                             re.IGNORECASE)))
+    return result
 
 
 def match_call_name(text: str, models: dict = None):
