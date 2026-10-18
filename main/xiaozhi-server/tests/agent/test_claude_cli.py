@@ -305,6 +305,41 @@ def test_single_sentence():
     assert provider_mod.single_sentence("") == ""
 
 
+def test_emotion_resent_after_filler(provider, monkeypatch):
+    sent = []
+
+    async def fake_get_emotion(conn, text):
+        sent.append(text)
+    monkeypatch.setattr(provider_mod.textUtils, "get_emotion", fake_get_emotion)
+    FakeAgent.delay = 0.8
+    FakeAgent.script = [[TextDelta("😆哈"), TextDelta("哈"), Done()]]
+    c = conn()
+    c.loop = provider._loop          # 测试里借用 provider 的事件循环执行
+    c.features = {}
+    provider.on_conn_open(c)
+    out = run(provider, c, "讲个笑话")
+    assert out.startswith("😶好的 我看一下。")
+    deadline = time.time() + 2
+    while not sent and time.time() < deadline:
+        time.sleep(0.05)
+    assert sent == ["😆"]
+
+
+def test_no_emotion_resent_without_filler(provider, monkeypatch):
+    sent = []
+
+    async def fake_get_emotion(conn, text):
+        sent.append(text)
+    monkeypatch.setattr(provider_mod.textUtils, "get_emotion", fake_get_emotion)
+    FakeAgent.script = [[TextDelta("😆哈哈"), Done()]]
+    c = conn()
+    c.loop = provider._loop
+    provider.on_conn_open(c)
+    run(provider, c, "讲个笑话")
+    time.sleep(0.2)
+    assert sent == []  # 没有填充语时，第一段文字的表情由原项目自己处理
+
+
 def test_error_is_spoken_friendly(provider):
     FakeAgent.script = [[Error(ErrorKind.AUTH, "401 raw details")]]
     c = conn()

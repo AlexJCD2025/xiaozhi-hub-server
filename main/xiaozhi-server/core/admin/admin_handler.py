@@ -8,14 +8,16 @@
 
 import asyncio
 import ipaddress
+import json
 from pathlib import Path
 
 from aiohttp import web
 
 from config.logger import setup_logging
-from core.admin import auth, config_store
+from core.admin import auth, config_store, connections
 from core.admin.status import collect_status
 from core.utils.modules_initialize import initialize_modules
+from core.utils.textUtils import EMOJI_MAP
 
 TAG = __name__
 logger = setup_logging()
@@ -35,6 +37,7 @@ class AdminHandler:
         self.ws_server = ws_server
         self.config_path = config_path
         self.sessions = auth.SessionStore()
+        self._emotion_tests = {}  # session_id -> asyncio.Task
         self.logger = logger
 
     def register(self, app: web.Application) -> None:
@@ -47,6 +50,8 @@ class AdminHandler:
                 web.post("/admin/api/login", self.handle_login),
                 web.post("/admin/api/logout", self.handle_logout),
                 web.get("/admin/api/status", self.handle_status),
+                web.get("/admin/api/devices", self.handle_devices),
+                web.post("/admin/api/devices/{session_id}/emotion-test", self.handle_emotion_test),
                 web.get("/admin/api/modules/{section}", self.handle_module_list),
                 web.post("/admin/api/modules/{section}/select", self.handle_module_select),
                 web.post("/admin/api/modules/{section}/entries/{name}", self.handle_module_update),
@@ -200,6 +205,37 @@ class AdminHandler:
             return self._error(f"没有名为 {name} 的配置", 404)
         self.logger.bind(tag=TAG).info(f"管理后台切换 {section} 为: {name}")
         return self._json({"ok": True, **await self._apply(section)})
+
+    # ---------- 在线设备与调试 ----------
+
+    async def handle_devices(self, request: web.Request):
+        self._require_login(request)
+        return self._json({"ok": True, "devices": connections.snapshot()})
+
+    async def handle_emotion_test(self, request: web.Request):
+        """依次给设备发送全部情绪消息，用来查看固件实际支持哪些表情。"""
+        self._require_login(request)
+        session_id = request.match_info["session_id"]
+        conn = connections.get(session_id)
+        if conn is None or getattr(conn, "websocket", None) is None:
+            return self._error("设备不在线", 404)
+        body = await self._read_json(request)
+        interval = min(max(float(body.get("interval") or 2), 0.5), 10)
+        running = self._emotion_tests.get(session_id)
+        if running and not running.done():
+            running.cancel()
+        sequence = [{"emoji": e, "emotion": name} for e, name in EMOJI_MAP.items()]
+
+        async def run():
+            for item in sequence:
+                await conn.websocket.send(json.dumps(
+                    {"type": "llm", "text": item["emoji"], "emotion": item["emotion"], "session_id": conn.session_id}
+                ))
+                await asyncio.sleep(interval)
+
+        self._emotion_tests[session_id] = asyncio.get_running_loop().create_task(run())
+        self.logger.bind(tag=TAG).info(f"开始表情测试：设备 {conn.device_id}，共 {len(sequence)} 种，间隔 {interval} 秒")
+        return self._json({"ok": True, "interval": interval, "sequence": sequence})
 
     async def _apply(self, section: str) -> dict:
         """把磁盘上的配置热加载到运行中的服务。

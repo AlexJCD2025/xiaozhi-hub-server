@@ -230,3 +230,34 @@ def test_unchanged_fields_are_not_written(cfg_path):
         merged(cfg_path), cfg_path)
     assert changed == []  # 值都没变，空的 extra_body 也不算新增
     assert "model_name: claude-haiku-5-5" in cfg_path.read_text(encoding="utf-8") and before != ""
+
+
+async def test_devices_and_emotion_test(client):
+    from types import SimpleNamespace
+    from core.admin import connections
+
+    await client.post("/admin/api/setup", json={"password": "pass-1234"})
+    assert (await (await client.get("/admin/api/devices")).json())["devices"] == []
+    sent = []
+
+    class FakeWS:
+        async def send(self, data):
+            sent.append(data)
+
+    fake = SimpleNamespace(session_id="s-1", device_id="dev-1", client_ip="192.168.6.211", websocket=FakeWS())
+    connections.register(fake)
+    try:
+        devices = (await (await client.get("/admin/api/devices")).json())["devices"]
+        assert devices[0]["device_id"] == "dev-1"
+        r = await client.post("/admin/api/devices/s-1/emotion-test", json={"interval": 0.5})
+        data = await r.json()
+        assert r.status == 200 and len(data["sequence"]) == 21
+        import asyncio
+        for _ in range(200):  # conftest 让 asyncio.sleep 立即返回，后台任务几轮调度即可发完
+            if len(sent) == 21:
+                break
+            await asyncio.sleep(0)
+        assert '"emotion": "funny"' in sent[0]
+        assert (await client.post("/admin/api/devices/none/emotion-test", json={})).status == 404
+    finally:
+        connections.unregister(fake)

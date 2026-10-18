@@ -172,7 +172,7 @@ async function openTab(tab) {
 // ---------- 状态 ----------
 
 async function renderStatus() {
-  const s = await api("status");
+  const [s, dev] = await Promise.all([api("status"), api("devices")]);
   const levelTag = { ok: '<span class="tag ok">正常</span>', warn: '<span class="tag warn">注意</span>', error: '<span class="tag err">异常</span>' };
   const mods = Object.entries(s.modules).map(([k, m]) =>
     `<div>${esc(SECTION_INFO[k].title)}</div><div>${esc(m.selected)} <span class="tag">${esc(m.type)}</span>
@@ -186,12 +186,37 @@ async function renderStatus() {
         <div>WebSocket</div><div><code>${esc(s.addresses.websocket)}</code></div>
         <div>管理后台</div><div><code>${esc(s.addresses.admin)}</code></div>
       </div></div>
+    <div class="card"><h2>在线设备</h2>
+      ${dev.devices.length ? dev.devices.map((d) => `<div class="check"><b>${esc(d.device_id || "未知设备")}</b>
+        <span class="muted">${esc(d.ip || "")}</span>
+        <button class="emo-test" data-sid="${esc(d.session_id)}" style="margin:0 0 0 auto;padding:4px 10px">表情测试</button></div>`).join("")
+        : '<p class="muted">暂无设备在线。唤醒设备后点"重新检查"刷新。</p>'}
+      <p class="muted" id="emo-now"></p></div>
     <div class="card"><h2>当前模块</h2><div class="kv">${mods}</div></div>
     <div class="card"><h2>环境自检</h2>
       ${s.checks.map((c) => `<div class="check"><b>${esc(c.name)}</b>${levelTag[c.level] || ""}<span class="muted">${esc(c.detail)}</span></div>`).join("")}
     </div>
     <button id="refresh">重新检查</button>`;
   $("refresh").onclick = () => openTab("status");
+  document.querySelectorAll(".emo-test").forEach((b) => { b.onclick = () => emotionTest(b.dataset.sid); });
+}
+
+let emoTimer = null;
+async function emotionTest(sid) {
+  try {
+    const r = await api(`devices/${encodeURIComponent(sid)}/emotion-test`, { interval: 2 });
+    clearInterval(emoTimer);
+    let i = 0;
+    const show = () => {
+      const el = $("emo-now");
+      if (!el) return clearInterval(emoTimer);
+      if (i >= r.sequence.length) { el.textContent = "表情测试结束。记下哪些表情在屏幕上有变化。"; return clearInterval(emoTimer); }
+      const it = r.sequence[i++];
+      el.textContent = `第 ${i}/${r.sequence.length} 个：${it.emoji} ${it.emotion}`;
+    };
+    show();
+    emoTimer = setInterval(show, r.interval * 1000);
+  } catch (e) { toast(e.message); }
 }
 
 // ---------- 模块配置 ----------

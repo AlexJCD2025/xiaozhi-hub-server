@@ -29,6 +29,7 @@ from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
 from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, wants_resume
 from core.providers.llm.base import LLMProviderBase
+from core.utils import textUtils
 from core.utils.prompt_manager import EMOJI_List
 
 TAG = __name__
@@ -262,6 +263,8 @@ class LLMProvider(LLMProviderBase):
         last_event_at = t0
         first_at = None
         filler_sent = False
+        emotion_buf = ""          # 填充语之后，正式回复开头的几个字，用来找表情
+        emotion_resent = False
         finished = False
         try:
             while True:
@@ -291,6 +294,15 @@ class LLMProvider(LLMProviderBase):
                 if isinstance(ev, TextDelta):
                     if first_at is None:
                         first_at = time.time() - t0
+                    if filler_sent and not emotion_resent:
+                        # 原项目每轮只按第一段文字设一次表情，填充语会把表情锁成 😶。
+                        # 正式回复开头带了表情时，再补发一次情绪消息，让设备换成真正的表情。
+                        emotion_buf += ev.text
+                        emoji = next((ch for ch in emotion_buf[:8] if ch in textUtils.EMOJI_MAP), None)
+                        if emoji or len(emotion_buf) >= 8:
+                            emotion_resent = True
+                            if emoji:
+                                self._send_emotion(st, emoji)
                     yield ev.text
                 elif isinstance(ev, Error):
                     logger.bind(tag=TAG).error(f"Claude Code 错误 [{ev.kind.value}]: {ev.detail[:500]}")
@@ -309,6 +321,14 @@ class LLMProvider(LLMProviderBase):
             if not finished and st.agent:
                 # 生成器被提前关闭（例如设备打断后服务端停止迭代），让 Claude 也停下来
                 asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+
+    def _send_emotion(self, st: ConnState, emoji: str) -> None:
+        conn = st.conn
+        loop = getattr(conn, "loop", None)
+        if conn is None or loop is None or not (getattr(conn, "features", None) or {}).get("emoji", True):
+            return
+        asyncio.run_coroutine_threadsafe(textUtils.get_emotion(conn, emoji), loop)
+        logger.bind(tag=TAG).debug(f"填充语之后补发表情 {emoji}")
 
     def response_no_stream(self, system_prompt, user_prompt, **kwargs):
         logger.bind(tag=TAG).warning("claude_cli 不支持非流式调用（意图识别、记忆总结等），请为这些模块单独配置 API 模型")

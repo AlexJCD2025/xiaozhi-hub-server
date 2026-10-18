@@ -219,9 +219,11 @@ class ConnectionHandler:
             )
 
             self.device_id = self.headers.get("device-id", None)
-            # [xiaozhi-hub] 通知 LLM 有新连接（claude_cli 按设备保存会话）
+            # [xiaozhi-hub] 通知 LLM 有新连接（claude_cli 按设备保存会话），并登记到管理后台
             if callable(getattr(self.llm, "on_conn_open", None)):
                 self.llm.on_conn_open(self)
+            from core.admin import connections as hub_connections
+            hub_connections.register(self)
 
             # 认证通过,继续处理
             self.websocket = ws
@@ -1546,7 +1548,9 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
-            # [xiaozhi-hub] 通知 LLM 连接关闭（claude_cli 结束对应的 Claude Code 进程）
+            # [xiaozhi-hub] 从管理后台注销；通知 LLM 连接关闭（claude_cli 结束对应的 Claude Code 进程）
+            from core.admin import connections as hub_connections
+            hub_connections.unregister(self)
             if callable(getattr(self.llm, "on_conn_close", None)):
                 try:
                     self.llm.on_conn_close(self)
