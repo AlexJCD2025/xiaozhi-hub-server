@@ -1,4 +1,4 @@
-# xiaozhi-hub-server 一键安装（Windows PowerShell）
+﻿# xiaozhi-hub-server 一键安装（Windows PowerShell）
 # ⚠️ 未实测：本脚本按 macOS 上实测过的 install.sh 逐步对照编写，尚未在 Windows 上运行验证。
 # 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 #   只装默认组合需要的依赖（不含 torch），语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
