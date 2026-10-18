@@ -170,6 +170,46 @@
   .plugin small { display: block; color: var(--muted); font-size: 12px; }
   .disabled-area { opacity: .45; pointer-events: none; }
 
+
+  /* 工作原理 */
+  .flow { display: flex; align-items: stretch; gap: 6px; overflow-x: auto; padding: 4px 2px 10px; }
+  .stage { flex: 1 1 0; min-width: 118px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 12px;
+           text-align: left; cursor: pointer; box-shadow: var(--shadow); }
+  .stage:hover { border-color: var(--accent-line); }
+  .stage.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .stage .num { font-size: 11px; color: var(--muted); }
+  .stage .ico { font-size: 20px; line-height: 1.4; }
+  .stage b { display: block; font-size: 14px; }
+  .stage .mod { display: block; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .stage small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .arrow { align-self: center; color: var(--muted); flex: none; }
+  .params > div { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .params > div:first-child { border-top: 0; }
+  .params .k { color: var(--muted); }
+  .branches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .branch { padding: 12px 14px; }
+  .branch b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .branch span { color: var(--muted); font-size: 13px; }
+  .msgs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .msg { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--soft); font-size: 12px; }
+  .msg code { color: var(--accent); font-size: 12px; }
+  .seg-card + .seg-card { margin-top: 12px; }
+  .seg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 22px; }
+  .seg-head .no { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+                  display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+  .seg-head b { font-size: 15px; margin-right: 4px; }
+  .seg-note { padding: 0 22px 12px; color: var(--muted); font-size: 13px; margin: 0; }
+  .prompt-text { margin: 0; padding: 14px 22px 18px; border-top: 1px solid var(--line); white-space: pre-wrap; word-break: break-word;
+                 font: 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 520px; overflow: auto; background: var(--soft);
+                 border-radius: 0 0 12px 12px; }
+  .prompt-text mark { background: var(--warn-soft); color: inherit; border-radius: 4px; padding: 0 2px; box-shadow: inset 0 0 0 1px rgba(180, 83, 9, .25); }
+  .prompt-text mark.persona { display: block; background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); padding: 6px 10px; margin: 2px 0; }
+  .prompt-text mark i { font-style: normal; font-size: 10.5px; color: var(--warn); margin-right: 4px; font-family: -apple-system, "PingFang SC", sans-serif; }
+  .prompt-text mark.persona i { color: var(--accent); }
+  details.pseg > summary { list-style: none; cursor: pointer; }
+  details.pseg > summary::-webkit-details-marker { display: none; }
+  details.pseg > summary .toggle { margin-left: auto; color: var(--muted); font-size: 12px; }
+
   /* 登录 */
   .auth { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
   .auth .card { width: 100%; max-width: 380px; padding: 28px; }
@@ -192,7 +232,10 @@
     .nav .ico { display: none; }
     .side-foot { display: none; }
     main { padding: 20px 16px 56px; }
-    .choices, .grid2, .grid3, .plugins { grid-template-columns: 1fr; }
+    .choices, .grid2, .grid3, .plugins, .branches { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; overflow: visible; }
+    .arrow { transform: rotate(90deg); }
+    .params > div { grid-template-columns: 1fr; gap: 2px; }
     .tiles { grid-template-columns: 1fr 1fr; }
     .kv { grid-template-columns: max-content minmax(0, 1fr); }
     .kv .copy { display: none; }
@@ -231,6 +274,7 @@
     <div class="brand"><div class="logo">🤖</div><span>小智 Hub</span></div>
     <nav class="nav" id="nav">
       <button data-page="status"><span class="ico">◎</span>状态</button>
+      <button data-page="how"><span class="ico">⇄</span>工作原理</button>
       <button data-page="llm"><span class="ico">✦</span>大模型</button>
       <button data-page="asr"><span class="ico">◐</span>语音识别</button>
       <button data-page="tts"><span class="ico">♪</span>语音合成</button>
@@ -329,7 +373,7 @@ $("auth-form").addEventListener("submit", async (ev) => {
 $("logout").onclick = async () => { if (!confirmLeave()) return; page.dirty = null; await api("logout", {}); await route(); };
 $("local-admin-url").textContent = `http://127.0.0.1:${location.port || 80}/admin`;
 
-const PAGES = { status: renderStatus, llm: renderLLM, asr: renderASR, tts: renderTTS, intent: renderIntent };
+const PAGES = { status: renderStatus, how: renderHow, llm: renderLLM, asr: renderASR, tts: renderTTS, intent: renderIntent };
 const page = { name: "", dirty: null, timer: null };
 function currentPage() { const p = location.hash.slice(1); return PAGES[p] ? p : "status"; }
 function confirmLeave() { return !(page.dirty && page.dirty()) || confirm("当前页面有修改还没保存，确定离开吗？"); }
@@ -451,6 +495,61 @@ function renderDevices(dev) {
       catch (err) { toast(err.message, true); }
     }));
   });
+}
+
+// ---------- 工作原理 ----------
+
+const SOURCE_PILL = { "原项目": "", "我们": "ok", "Claude Code": "warn" };
+let howStage = "llm";
+async function renderHow(root) {
+  const d = await api("pipeline");
+  const f = d.flow, p = d.prompt, m = p.marks;
+  const markRe = new RegExp(`${m.start}(\\w+)${m.sep}([\\s\\S]*?)${m.end}`, "g");
+  const highlight = (text) => esc(text).replace(markRe, (_, name, value) => {
+    const label = p.var_labels[name] || name;
+    if (name === "base_prompt") return `<mark class="persona"><i>${esc(label)}</i>${value}</mark>`;
+    return value.trim() ? `<mark title="${esc(name)}"><i>${esc(label)}</i>${value}</mark>` : `<mark title="${esc(name)}"><i>${esc(label)}</i>（空）</mark>`;
+  });
+  const plain = (text) => text.replace(markRe, (_, name, value) => value);
+  root.innerHTML = `
+    <div class="page-head"><div><h1>工作原理</h1><p class="sub">对设备说一句话之后，服务端每一步做了什么。内容按当前配置生成，切换模块后会跟着变。</p></div></div>
+    <div class="section-title">一句话的旅程 <span class="muted small" style="font-weight:400">点每一步看细节</span></div>
+    <div class="flow">${f.stages.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}
+      <button class="stage ${s.id === howStage ? "on" : ""}" data-stage="${s.id}">
+        <span class="num">第 ${i + 1} 步</span><div class="ico">${s.icon}</div><b>${esc(s.title)}</b>
+        <span class="mod">${esc(s.module)}</span><small>${esc(s.summary)}</small></button>`).join("")}</div>
+    <div class="card" id="stage-detail" style="margin-top:6px"></div>
+    <div class="section-title">特殊情况（不走完整流程）</div>
+    <div class="branches">${f.branches.map((b) => `<div class="card branch"><b>${esc(b.title)}</b><span>${esc(b.text)}</span></div>`).join("")}</div>
+    <div class="section-title">设备每轮依次收到的消息</div>
+    <div class="msgs">${f.messages.map((x, i) => `${i ? '<span class="muted">→</span>' : ""}<div class="msg"><code>${esc(x.type)}</code> ${esc(x.text)}</div>`).join("")}</div>
+
+    <div class="section-title">提示词拆解 · 发给 ${esc(p.llm)} 的内容，按顺序拼在一起</div>
+    ${p.warnings.map((w) => `<div class="banner warn">${esc(w)}</div>`).join("")}
+    ${p.segments.map((s, i) => `<details class="card seg-card pseg" ${s.collapsed ? "" : "open"}>
+      <summary class="seg-head"><span class="no">${i + 1}</span><b>${esc(s.title)}</b>
+        <span class="pill ${SOURCE_PILL[s.source] ?? ""}">来源：${esc(s.source)}</span><span class="pill">${esc(s.when)}</span>
+        <span class="toggle">展开 / 收起</span></summary>
+      <p class="seg-note">${esc(s.note)}</p>
+      ${s.text ? `<pre class="prompt-text">${highlight(s.text)}</pre>
+        <div class="actions" style="margin:0;padding:0 22px 14px"><button class="btn sm" data-copyseg="${i}">复制这段</button></div>` : ""}
+    </details>`).join("")}
+    ${p.actual ? `<details class="card seg-card pseg"><summary class="seg-head"><b>在线设备 ${esc(p.actual.device_id || "")} 实际使用的系统提示词</b>
+        <span class="toggle">展开 / 收起</span></summary>
+      <p class="seg-note">这是这台设备连接时真正生成的版本（第 ${p.segments.findIndex((s) => s.id === "base") + 1} 段），可以和上面的预览对照。</p>
+      <pre class="prompt-text">${esc(p.actual.text)}</pre></details>` : ""}`;
+  const showStage = () => {
+    const s = f.stages.find((x) => x.id === howStage);
+    $("stage-detail").innerHTML = `<div class="card-head"><h2>${s.icon} ${esc(s.title)} · ${esc(s.module)}</h2></div>
+      <div class="panel params">${s.params.map((x) => `<div><span class="k">${esc(x.label)}</span><span>${esc(x.value)}</span></div>`).join("")}</div>`;
+  };
+  root.querySelectorAll("[data-stage]").forEach((b) => (b.onclick = () => {
+    howStage = b.dataset.stage;
+    root.querySelectorAll("[data-stage]").forEach((x) => x.classList.toggle("on", x === b));
+    showStage();
+  }));
+  root.querySelectorAll("[data-copyseg]").forEach((b) => (b.onclick = () => copyText(plain(p.segments[+b.dataset.copyseg].text))));
+  showStage();
 }
 
 // ---------- 大模型 ----------
