@@ -112,3 +112,42 @@ async def test_handle_disabled_and_custom_reply(spoken):
     assert await handle_call_name(make_conn({"enabled": False}), "Hi, cloud.") == "Hi, cloud."
     assert await handle_call_name(make_conn({"reply": "Claude 在呢"}), "嗨 Claude") is None
     assert spoken["tts"] == ["Claude 在呢"]
+
+
+# ---------- 录入 ----------
+
+@pytest.mark.parametrize("asr_text, alias", [
+    ("嗨cloud。", "cloud"), ("Hi, cloud. Hi, cloud.", "cloud"), ("High cloud.", "cloud"),
+    ("hicloud", "cloud"), ("嘿 克劳德！", "克劳德"), ("克劳德", "克劳德"), ("嗨。", ""),
+])
+def test_extract_alias(asr_text, alias):
+    assert call_names.extract_alias(asr_text) == alias
+
+
+def test_learner_counts_and_targets_device():
+    lr = call_names.Learner()
+    assert lr.capture("s1", "嗨 cloud") is None  # 没开始录入
+    lr.start("s1", count=2)
+    assert lr.capture("s2", "嗨 cloud") is None  # 不是目标设备
+    assert lr.capture("s1", "嗨 cloud") == (1, 2)
+    assert lr.capture("s1", "嗨 克劳德") == (2, 2)
+    assert lr.capture("s1", "嗨 第三遍") is None  # 录满了
+    st = lr.status()
+    assert st["active"] is False and [x["alias"] for x in st["samples"]] == ["cloud", "克劳德"]
+    lr.start(None, count=1, timeout=-1)
+    assert lr.capture("s1", "嗨 cloud") is None  # 超时
+
+
+async def test_learning_intercepts_before_model(spoken, monkeypatch):
+    lr = call_names.Learner()
+    monkeypatch.setattr(call_names, "learner", lr)
+    c = make_conn()
+    c.session_id = "s1"
+    c.config["wakeup_words"] = ["嘿你好呀"]
+    lr.start("s1", count=2)
+    assert await handle_call_name(c, "嘿，你好呀") == "嘿，你好呀"  # 唤醒词不算一遍
+    assert await handle_call_name(c, "嗨cloud。") is None
+    assert spoken["tts"] == ["收到第 1 遍"]
+    assert await handle_call_name(c, "嗨 克劳德") is None
+    assert spoken["tts"][-1] == "录好了，请到管理后台确认"
+    assert await handle_call_name(c, "今天天气怎么样") == "今天天气怎么样"  # 录满后恢复正常

@@ -286,3 +286,48 @@ async def test_emotion_single_and_stop(client):
         assert len(devices["emotions"]) == 21 and devices["emotions"][0]["label"]
     finally:
         connections.unregister(fake)
+
+
+# ---------- 呼名 ----------
+
+def test_describe_call_names_defaults(cfg_path):
+    d = pages.describe_call_names(merged(cfg_path))
+    assert d["enabled"] is True and d["target"] == "Claude" and "cloud" in d["aliases"]
+    assert d["aliases"] == d["default_aliases"]
+
+
+def test_save_call_names_validates_and_writes(cfg_path):
+    changed = pages.save_call_names({"aliases": ["Cloud", "克劳德", "cloud", " "], "reply": "在呢"}, merged(cfg_path), cfg_path)
+    assert set(changed) == {"aliases", "reply"}
+    d = pages.describe_call_names(merged(cfg_path))
+    assert d["aliases"] == ["cloud", "克劳德"] and d["reply"] == "在呢"  # 去重、去空、转小写
+    assert pages.save_call_names({"aliases": ["cloud", "克劳德"], "reply": "在呢"}, merged(cfg_path), cfg_path) == []
+    for bad, msg in ((["cloud code"], "空格或标点"), (["c"], "2 到 20"), (["hi"], "招呼语"), ([], "至少")):
+        with pytest.raises(ValueError, match=msg):
+            pages.save_call_names({"aliases": bad}, merged(cfg_path), cfg_path)
+    assert pages.save_call_names({"aliases": [], "enabled": False}, merged(cfg_path), cfg_path)  # 关闭时可以不留称呼
+
+
+async def test_call_names_endpoints_apply_to_online_connections(client):
+    from core.agent.call_names import learner
+
+    fake = SimpleNamespace(session_id="s-7", device_id="dev-7", client_ip="x", config={})
+    connections.register(fake)
+    try:
+        d = await (await client.get("/admin/api/call-names")).json()
+        assert d["ok"] and d["devices"][0]["session_id"] == "s-7" and d["learning"]["active"] is False
+        r = await client.post("/admin/api/call-names", json={"aliases": ["cloud", "克老德"]})
+        assert r.status == 200 and (await r.json())["changed"] == ["aliases"]
+        assert fake.config["call_names"]["models"]["claude"] == ["cloud", "克老德"]  # 在线连接马上生效
+        assert client.handler.config["call_names"]["models"]["claude"] == ["cloud", "克老德"]
+        assert (await client.post("/admin/api/call-names", json={"aliases": ["x y"]})).status == 400
+
+        r = await (await client.post("/admin/api/call-names/learn", json={})).json()
+        assert r["learning"]["active"] and r["learning"]["session_id"] == "s-7"  # 只有一台在线时自动选它
+        assert (await client.post("/admin/api/call-names/learn", json={"session_id": "gone"})).status == 400
+        r = await (await client.post("/admin/api/call-names/learn/stop", json={})).json()
+        assert r["learning"]["active"] is False
+    finally:
+        learner.stop()
+        connections.unregister(fake)
+    assert (await client.post("/admin/api/call-names/learn", json={})).status == 400  # 没有设备在线

@@ -374,3 +374,64 @@ def remember_api_intent(mode: str, path: Path = None) -> None:
         return
     with config_store.edit_custom(path) as data:
         data.setdefault("admin", CommentedMap())["api_intent"] = mode
+
+
+# ---------- 呼名 ----------
+
+CALL_TARGET = "claude"  # 目前只支持呼叫 Claude；多模型路由做好后，这里换成可选的模型
+ALIAS_BAD = re.compile(r"[\s,，.。!！?？、~～;；:：\"'“”‘’]")
+
+
+def describe_call_names(merged: dict) -> dict:
+    from core.agent import call_names
+
+    cfg = merged.get("call_names") or {}
+    models = cfg.get("models") or {}
+    custom = CALL_TARGET in models
+    aliases = call_names._aliases(models.get(CALL_TARGET)) if custom else list(call_names.DEFAULT_MODELS[CALL_TARGET])
+    return {
+        "enabled": bool(cfg.get("enabled", True)),
+        "reply": str(cfg.get("reply") or call_names.DEFAULT_REPLY),
+        "target": "Claude",
+        "aliases": aliases,
+        "default_aliases": list(call_names.DEFAULT_MODELS[CALL_TARGET]),
+        "prefixes": ["嗨", "嘿", "hi", "hey"],
+    }
+
+
+def save_call_names(payload: dict, merged: dict, path: Path = None) -> list:
+    """保存呼名设置，返回修改了的项。取值不对时抛出 ValueError。"""
+    from core.agent import call_names
+
+    current = describe_call_names(merged)
+    enabled = bool(payload.get("enabled", current["enabled"]))
+    reply = str(payload.get("reply", current["reply"]) or "").strip() or call_names.DEFAULT_REPLY
+    if len(reply) > 40:
+        raise ValueError("回复太长了，请控制在 40 个字以内")
+    raw = payload.get("aliases", current["aliases"])
+    if not isinstance(raw, list):
+        raise ValueError("称呼格式不对")
+    aliases = []
+    for item in raw:
+        alias = str(item or "").strip().lower()
+        if not alias or alias in aliases:
+            continue
+        if ALIAS_BAD.search(alias):
+            raise ValueError(f"称呼“{alias}”里不能有空格或标点")
+        if not 2 <= len(alias) <= 20:
+            raise ValueError(f"称呼“{alias}”要在 2 到 20 个字之间")
+        if alias in call_names._PREFIXES:
+            raise ValueError(f"“{alias}”是开头的招呼语，不能当称呼")
+        aliases.append(alias)
+    if enabled and not aliases:
+        raise ValueError("至少要有一个称呼")
+
+    changed = [k for k, v in (("enabled", enabled), ("reply", reply), ("aliases", aliases)) if v != current[k]]
+    if not changed:
+        return []
+    with config_store.edit_custom(path) as data:
+        cfg = data.setdefault("call_names", CommentedMap())
+        cfg["enabled"] = enabled
+        cfg["reply"] = reply
+        cfg.setdefault("models", CommentedMap())[CALL_TARGET] = CommentedSeq(aliases)
+    return changed

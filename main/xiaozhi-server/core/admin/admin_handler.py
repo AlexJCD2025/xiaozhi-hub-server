@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import copy
 import functools
 import ipaddress
 import json
@@ -72,6 +73,10 @@ class AdminHandler:
                 web.get("/admin/api/tts/preview", self.handle_tts_preview),
                 web.get("/admin/api/intent", self.handle_intent),
                 web.post("/admin/api/intent", self.handle_intent_save),
+                web.get("/admin/api/call-names", self.handle_call_names),
+                web.post("/admin/api/call-names", self.handle_call_names_save),
+                web.post("/admin/api/call-names/learn", self.handle_call_names_learn),
+                web.post("/admin/api/call-names/learn/stop", self.handle_call_names_learn_stop),
             ]
         )
 
@@ -268,6 +273,57 @@ class AdminHandler:
             old.shutdown()
         except Exception as e:
             self.logger.bind(tag=TAG).warning(f"旧实例退役出错: {e}")
+
+    # ---------- 呼名 ----------
+
+    async def handle_call_names(self, request: web.Request):
+        self._require_login(request)
+        from core.agent.call_names import learner
+
+        merged = await self._blocking(self._merged)
+        return self._json({"ok": True, **pages.describe_call_names(merged), "learning": learner.status(),
+                           "devices": connections.snapshot()})
+
+    async def handle_call_names_save(self, request: web.Request):
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(pages.save_call_names, body, merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        if changed:
+            # 设置马上生效：服务的配置和每个在线连接各自的配置副本都要更新
+            new_cfg = (await self._blocking(self._merged)).get("call_names") or {}
+            self.config["call_names"] = copy.deepcopy(new_cfg)
+            for item in connections.snapshot():
+                conn = connections.get(item["session_id"])
+                if conn is not None:
+                    conn.config["call_names"] = copy.deepcopy(new_cfg)
+            self.logger.bind(tag=TAG).info(f"管理后台更新了呼名设置: {', '.join(changed)}")
+        return self._json({"ok": True, "changed": changed, "note": "已保存，马上生效" if changed else "没有修改"})
+
+    async def handle_call_names_learn(self, request: web.Request):
+        self._require_login(request)
+        from core.agent.call_names import learner
+
+        body = await self._read_json(request)
+        session_id = str(body.get("session_id") or "") or None
+        online = [d["session_id"] for d in connections.snapshot()]
+        if not online:
+            return self._error("没有设备在线，请先唤醒设备", 400)
+        if session_id and session_id not in online:
+            return self._error("这台设备已经离线", 400)
+        learner.start(session_id or (online[0] if len(online) == 1 else None))
+        self.logger.bind(tag=TAG).info("管理后台开始录入呼名")
+        return self._json({"ok": True, "learning": learner.status()})
+
+    async def handle_call_names_learn_stop(self, request: web.Request):
+        self._require_login(request)
+        from core.agent.call_names import learner
+
+        learner.stop()
+        return self._json({"ok": True, "learning": learner.status()})
 
     # ---------- 状态 ----------
 
