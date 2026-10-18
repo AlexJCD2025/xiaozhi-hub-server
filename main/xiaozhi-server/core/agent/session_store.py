@@ -48,6 +48,14 @@ class SessionStore:
             }
             self._write_all(data)
 
+    def put(self, device_key: str, record: dict, now: float = None) -> None:
+        """保存任意记录（如设备上次用的模型），自动加上 last_active。"""
+        with self._lock:
+            data = self._read_all()
+            data.setdefault(self.namespace, {})[device_key] = {
+                **record, "last_active": now if now is not None else time.time()}
+            self._write_all(data)
+
     def forget(self, device_key: str) -> None:
         with self._lock:
             data = self._read_all()

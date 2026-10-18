@@ -314,7 +314,8 @@ class AdminHandler:
             return self._error("没有设备在线，请先唤醒设备", 400)
         if session_id and session_id not in online:
             return self._error("这台设备已经离线", 400)
-        learner.start(session_id or (online[0] if len(online) == 1 else None))
+        target = str(body.get("target") or "") or None
+        learner.start(session_id or (online[0] if len(online) == 1 else None), target=target)
         self.logger.bind(tag=TAG).info("管理后台开始录入呼名")
         return self._json({"ok": True, "learning": learner.status()})
 
