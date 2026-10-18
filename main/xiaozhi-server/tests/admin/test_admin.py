@@ -308,3 +308,105 @@ async def test_apply_failure_keeps_running_config(cfg_path, monkeypatch):
     result = await h._apply("LLM")
     assert result["applied"] is False
     assert running["selected_module"]["LLM"] == "ClaudeAPI" and ws._llm == "old-llm"  # 失败时服务保持原状
+
+
+# ---------- 模块依赖检测（精简安装） ----------
+
+def test_missing_packages_reads_module_level_imports(tmp_path, monkeypatch):
+    from core.admin import deps
+
+    src = tmp_path / "fake_provider.py"
+    src.write_text(
+        "import os\n"
+        "import xiaozhi_missing_top\n"
+        "from xiaozhi_missing_from.sub import thing\n"
+        "if True:\n"
+        "    import xiaozhi_missing_in_if\n"
+        "try:\n"
+        "    import xiaozhi_optional\n"
+        "except ImportError:\n"
+        "    pass\n"
+        "def lazy():\n"
+        "    import xiaozhi_lazy\n"
+        "from core.admin import config_store\n",  # 项目自身的模块：递归检查，本身不算缺失
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(deps, "provider_file", lambda section, type_: src)
+    clear_deps_cache(deps)
+    try:
+        assert deps.missing_packages("ASR", "fake") == (
+            "xiaozhi_missing_from", "xiaozhi_missing_in_if", "xiaozhi_missing_top")
+    finally:
+        clear_deps_cache(deps)
+
+
+def clear_deps_cache(deps):
+    deps.missing_packages.cache_clear()
+    deps._find_top.cache_clear()
+    deps._submodule_exists.cache_clear()
+
+
+def test_missing_packages_real_providers(monkeypatch):
+    import importlib.machinery
+    import sys
+    from core.admin import deps
+
+    # tests/conftest.py 会把 funasr 等重型包换成桩模块，这里移除桩，按真实安装情况判断
+    for name in [m for m in sys.modules if m == "funasr" or m.startswith("funasr.")]:
+        monkeypatch.delitem(sys.modules, name)
+    clear_deps_cache(deps)
+    try:
+        assert deps.missing_packages("ASR", "sherpa_onnx_local") == ()  # 默认 ASR，精简安装也必须齐全
+        assert deps.missing_packages("TTS", "edge") == ()
+        assert deps.missing_packages("LLM", "claude_cli") == ()
+        has_funasr = importlib.machinery.PathFinder.find_spec("funasr") is not None
+        assert deps.missing_packages("ASR", "fun_local") == (() if has_funasr else ("funasr",))
+        assert deps.missing_packages("ASR", "no_such_provider") == ()  # 找不到源文件交给原项目报错
+    finally:
+        clear_deps_cache(deps)
+
+
+async def test_select_refuses_module_without_packages(client, cfg_path, monkeypatch):
+    from core.admin import deps
+
+    monkeypatch.setattr(deps, "missing_packages",
+                        lambda section, type_: ("funasr",) if type_ == "fun_local" else ())
+    await client.post("/admin/api/setup", json={"password": "pass-1234"})
+    data = await (await client.get("/admin/api/modules/ASR")).json()
+    entries = {e["name"]: e for e in data["entries"]}
+    assert entries["FunASR"]["missing"] == ["funasr"] and entries["SherpaASR"]["missing"] == []
+
+    r = await client.post("/admin/api/modules/ASR/select", json={"name": "FunASR"})
+    assert r.status == 400 and "funasr" in (await r.json())["error"]
+    assert "ASR" not in config_store.load_custom(cfg_path)["selected_module"]  # 没有写入配置
+
+
+def test_status_checks_module_packages_and_sherpa_model(tmp_path, monkeypatch):
+    from core.admin import deps
+    from core.admin.status import collect_status
+
+    model_dir = tmp_path / "sherpa"
+    model_dir.mkdir()
+    p = tmp_path / ".config.yaml"
+    p.write_text(
+        "selected_module:\n  ASR: SherpaASR\n  LLM: ClaudeAPI\n"
+        f"ASR:\n  SherpaASR:\n    model_dir: {model_dir}\n", encoding="utf-8")
+
+    def check(name):
+        m = config_store.load_merged(custom_path=p)
+        return next(c for c in collect_status(m, m)["checks"] if c["name"] == name)
+
+    c = check("语音识别模型")
+    assert c["level"] == "error" and "model.int8.onnx" in c["detail"]
+    with open(model_dir / "model.int8.onnx", "wb") as f:
+        f.truncate(240 * 1024 * 1024)  # 稀疏文件，不占实际空间
+    c = check("语音识别模型")
+    assert c["level"] == "error" and "tokens.txt" in c["detail"]
+    (model_dir / "tokens.txt").write_text("x", encoding="utf-8")
+    assert check("语音识别模型")["level"] == "ok"
+
+    assert check("模块依赖")["level"] == "ok"
+    monkeypatch.setattr(deps, "missing_packages",
+                        lambda section, type_: ("sherpa_onnx",) if section == "ASR" else ())
+    c = check("模块依赖")
+    assert c["level"] == "error" and "SherpaASR 缺少 sherpa_onnx" in c["detail"]

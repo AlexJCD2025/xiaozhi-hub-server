@@ -103,8 +103,8 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const SECTION_INFO = {
   LLM: { title: "大模型", hint: "选择对话使用的大模型。Claude CLI 使用本机已登录的 Claude Code；其他模型需要填写对应的 API Key。",
          common: ["ClaudeCLI", "ClaudeAPI", "ChatGLMLLM", "DeepSeekLLM", "AliLLM", "DoubaoLLM"] },
-  ASR: { title: "语音识别", hint: "把设备说的话转成文字。FunASR 在本机运行，不需要联网；其他多为云端服务，需要密钥。切换后会在后台重新加载，本地模型需要几秒。",
-         common: ["FunASR", "SherpaASR", "AliyunStreamASR", "DoubaoStreamASR"] },
+  ASR: { title: "语音识别", hint: "把设备说的话转成文字。SherpaASR 和 FunASR 都在本机运行 SenseVoice，不需要联网，准确率相当；SherpaASR 内存占用约为 FunASR 的一半、识别更快，FunASR 需要完整安装。其他多为云端服务，需要密钥。切换后会在后台重新加载，本地模型需要几秒。",
+         common: ["SherpaASR", "FunASR", "AliyunStreamASR", "DoubaoStreamASR"] },
   TTS: { title: "语音合成", hint: "把回复转成语音。EdgeTTS 免费且不需要密钥。修改后设备重新连接时生效。",
          common: ["EdgeTTS", "DoubaoTTS", "AliyunStreamTTS", "CosyVoiceSiliconflow"] },
   Intent: { title: "意图识别", hint: "使用 Claude CLI 时请选 nointent。function_call 需要模型支持工具调用，可使用插件（天气、新闻、音乐等）。",
@@ -244,14 +244,17 @@ function entryCard(section, e, selected, running) {
     e.name === selected ? '<span class="tag ok">已选择</span>' : "",
     e.name === running && running !== selected ? '<span class="tag warn">运行中</span>' : "",
     e.needs_key ? '<span class="tag warn">缺少密钥</span>' : "",
+    e.missing.length ? '<span class="tag err">未安装</span>' : "",
   ].join(" ");
+  const missing = e.missing.length
+    ? `<div class="warnbox muted">需要的 Python 包没有安装：${esc(e.missing.join(", "))}。精简安装不包含这个模块，请用完整安装（install.sh --full）后再使用。</div>` : "";
   const warn = section === "LLM" && e.type === "claude_cli"
     ? '<div class="warnbox muted">放开 Bash、Write、Edit 等工具后，语音指令就能在电脑上执行命令或修改文件，请谨慎。</div>' : "";
-  div.innerHTML = `<h2>${esc(e.name)} ${tags}</h2>${warn}
+  div.innerHTML = `<h2>${esc(e.name)} ${tags}</h2>${missing}${warn}
     ${e.fields.length ? e.fields.map(fieldHtml).join("") : '<p class="muted">没有可编辑的字段。</p>'}
     <div class="row" style="justify-content:flex-start;gap:12px">
       ${e.fields.length ? '<button data-act="save">保存</button>' : ""}
-      ${e.name !== selected ? '<button data-act="select">使用这个</button>' : ""}
+      ${e.name !== selected && !e.missing.length ? '<button data-act="select">使用这个</button>' : ""}
     </div>`;
   const save = div.querySelector('[data-act="save"]');
   if (save) save.onclick = async () => {
@@ -285,7 +288,7 @@ async function renderSection(section) {
   const panel = $("panel");
   panel.innerHTML = `<div class="card"><h2>${esc(info.title)}</h2><p class="muted">${esc(info.hint)}</p>
     <div class="row"><label>当前选择<select id="sel">${data.entries.map((e) =>
-      `<option value="${esc(e.name)}" ${e.name === data.selected ? "selected" : ""}>${esc(e.name)}（${esc(e.type)}）${e.needs_key ? " · 缺少密钥" : ""}</option>`).join("")}
+      `<option value="${esc(e.name)}" ${e.name === data.selected ? "selected" : ""}>${esc(e.name)}（${esc(e.type)}）${e.needs_key ? " · 缺少密钥" : ""}${e.missing.length ? " · 未安装" : ""}</option>`).join("")}
     </select></label><button id="sel-btn">切换</button></div>
     ${data.running && data.running !== data.selected ? `<div class="warnbox muted">已选择 ${esc(data.selected)}，但服务仍在使用 ${esc(data.running)}。</div>` : ""}
     </div>`;

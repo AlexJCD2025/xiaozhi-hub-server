@@ -3,20 +3,22 @@
     main/xiaozhi-server/.venv/bin/python scripts/doctor.py          # macOS / Linux
     main\\xiaozhi-server\\.venv\\Scripts\\python scripts\\doctor.py   # Windows
 
-检查项：配置文件、核心依赖、ffmpeg / opus、ASR 模型、所选大模型（Claude Code 或 API Key）、
-端口是否空闲、局域网地址。有"异常"时退出码为 1。
+检查项：核心依赖、插件能否导入、配置文件、所选模块的依赖、ffmpeg / opus、ASR 模型、
+所选大模型（Claude Code 或 API Key）、端口是否空闲、局域网地址。有"异常"时退出码为 1。
 """
 
 import argparse
 import importlib
 import os
+import pkgutil
 import socket
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = ROOT / "main" / "xiaozhi-server"
-CORE_MODULES = ["torch", "funasr", "opuslib_next", "onnxruntime", "edge_tts", "openai", "websockets",
+# 精简安装和完整安装都必须有的包；FunASR 等可选模块的依赖由"模块依赖"一项按所选模块检查
+CORE_MODULES = ["opuslib_next", "onnxruntime", "sherpa_onnx", "edge_tts", "openai", "websockets",
                 "aiohttp", "ruamel.yaml", "loguru"]
 ICON = {"ok": "✅", "warn": "⚠️ ", "error": "❌"}
 
@@ -53,6 +55,20 @@ def main() -> int:
     add("核心依赖", "error" if missing else "ok", "缺少 " + "、".join(missing) if missing else f"{len(CORE_MODULES)} 个均可导入")
     if missing:
         return report(results)
+
+    # 插件在服务启动时全部导入，任何一个导入失败都会导致服务无法启动。
+    # 同步上游后如果新增了插件依赖、而精简清单没有跟上，这里会直接指出缺了什么
+    import plugins_func.functions as functions
+    broken = []
+    names = [m.name for m in pkgutil.iter_modules(functions.__path__)]
+    for name in names:
+        try:
+            importlib.import_module(f"plugins_func.functions.{name}")
+        except Exception as e:
+            broken.append(f"{name}（{type(e).__name__}: {e}）")
+    add("插件", "error" if broken else "ok",
+        "导入失败：" + "、".join(broken) + "。请把缺少的包加入 requirements-hub-core.txt" if broken
+        else f"{len(names)} 个均可导入")
 
     # 2. 配置文件
     cfg_path = SERVER_DIR / "data" / ".config.yaml"

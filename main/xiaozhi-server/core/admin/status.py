@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from config.config_loader import get_project_dir
-from core.admin import config_store
+from core.admin import config_store, deps
 from core.utils.util import get_local_ip
 
 _cli_cache = {}  # {cli_path: (检查时间, 版本文本)}
@@ -53,13 +53,28 @@ def collect_status(config: dict, merged: dict) -> dict:
         opus_ok, opus = False, f"{opus or ''} 加载失败: {e}"
     checks.append(_check("opus", opus_ok, opus or "已加载"))
 
-    # 语音识别模型（只检查本地 FunASR 的模型文件）
+    # 所选模块需要的 Python 包（精简安装时，部分模块的依赖没有安装）
+    lacking = []
+    for section in config_store.SECTIONS:
+        name = selected.get(section)
+        missing = deps.missing_packages(section, config_store.entry_type(merged, section)) if name else ()
+        if missing:
+            lacking.append(f"{name} 缺少 {', '.join(missing)}")
+    checks.append(_check("模块依赖", not lacking,
+                         "；".join(lacking) + "。请用完整安装（install.sh --full）" if lacking else "所选模块的依赖均已安装"))
+
+    # 语音识别模型（检查本地模型文件：FunASR 和 sherpa-onnx）
     asr_entry = (merged.get("ASR") or {}).get(selected.get("ASR"), {})
-    if asr_entry.get("type") == "fun_local":
-        model = Path(get_project_dir()) / asr_entry.get("model_dir", "models/SenseVoiceSmall") / "model.pt"
+    model_files = {"fun_local": ("models/SenseVoiceSmall", ["model.pt"]),
+                   "sherpa_onnx_local": ("", ["model.int8.onnx", "tokens.txt"])}.get(asr_entry.get("type"))
+    if model_files:
+        model_dir = Path(get_project_dir()) / (asr_entry.get("model_dir") or model_files[0])
+        model = model_dir / model_files[1][0]
         size = model.stat().st_size if model.exists() else 0
-        checks.append(_check("语音识别模型", size > 100 * 1024 * 1024,
-                             f"{model.name} {size // (1024 * 1024)}MB" if size else f"缺少 {model}"))
+        absent = [f for f in model_files[1] if not (model_dir / f).exists()]
+        checks.append(_check("语音识别模型", size > 100 * 1024 * 1024 and not absent,
+                             f"{model.name} {size // (1024 * 1024)}MB" if size and not absent
+                             else f"缺少 {model_dir / absent[0]}" if absent else f"{model} 文件不完整"))
 
     # 大模型
     llm_type = config_store.entry_type(merged, "LLM")

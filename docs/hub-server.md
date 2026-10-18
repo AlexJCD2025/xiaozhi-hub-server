@@ -11,6 +11,7 @@ xiaozhi-hub-server 是一个**兼容小智协议的社区项目**，基于 [xinn
 | **Claude Code 接入（`claude_cli`）** | 设备可以直接调用本机已登录的 Claude Code：语音对话、读取工作目录里的文件、执行任务。每台设备对应一个常驻进程，支持打断、断线重连后接续上下文，也可以说"接着上次聊"接续更早的会话 |
 | **轻量管理后台** | 网页 `/admin`，可以配置大模型、API Key、语音识别和语音合成、意图识别、Claude CLI 参数，查看环境自检结果和在线设备。不需要数据库、Java 或 Redis，不使用原项目的智控台 |
 | **一键安装和启动** | 源码方式运行，不需要 Docker。`scripts/install.sh` 和 `scripts/start.sh`（macOS / Linux），`scripts/install.ps1` 和 `scripts/start.ps1`（Windows，**未实测**） |
+| **默认精简安装** | 只装默认组合需要的依赖，不装 torch。语音识别改用 sherpa-onnx 运行同一个 SenseVoice 模型（int8 版）：准确率与 FunASR 相当，内存约为它的一半，识别更快。需要原项目的全部模块时可以完整安装 |
 | **默认端口** | HTTP（OTA 接口、管理后台）用 16688，WebSocket 用 16689 |
 | **体验修复** | 设备说话断续（每句话开始时重新预缓冲）、OTA 地址漏写结尾斜杠时返回 404、Claude API 隐藏思考导致响应慢甚至没有回复 |
 
@@ -18,12 +19,23 @@ xiaozhi-hub-server 是一个**兼容小智协议的社区项目**，基于 [xinn
 
 ## 安装与启动
 
-要求：macOS 或 Linux（Windows 脚本未实测），能访问网络。安装脚本会自动安装 uv、Python 3.10、opus、ffmpeg 和全部依赖，并下载约 900MB 的语音识别模型。
+要求：macOS 或 Linux（Windows 脚本未实测），能访问网络。安装脚本会自动安装 uv、Python 3.10、opus、ffmpeg 和所需的 Python 依赖，并下载约 240MB 的语音识别模型。
 
 ```bash
 bash scripts/install.sh
 bash scripts/start.sh
 ```
+
+**精简安装与完整安装**：
+
+| | 精简安装（默认） | 完整安装（`install.sh --full`，Windows 用 `-Full`） |
+| --- | --- | --- |
+| Python 依赖 | 约 90 个包，约 550MB，不含 torch | 原项目的全部依赖，约 220 个包，约 1.4GB |
+| 语音识别 | SherpaASR（sherpa-onnx 版 SenseVoice，模型约 240MB） | 额外下载 FunASR 的模型（约 900MB），可在后台切换 |
+| 运行内存 | 约 0.9GB | 使用 FunASR 时约 1.6GB，识别时峰值约 2.8GB |
+| 可用模块 | 默认组合：SileroVAD、SherpaASR、EdgeTTS、Claude CLI 和 OpenAI 兼容接口的大模型等 | 原项目的所有模块 |
+
+精简安装时，管理后台会把缺少依赖的模块标为"未安装"，不能切换过去。之前完整安装过、想改为精简安装的，删除 `main/xiaozhi-server/.venv` 后重新运行安装脚本即可。依赖清单见 `main/xiaozhi-server/requirements-hub-core.txt`，版本跟随原项目的 `requirements.txt`。
 
 可选环境变量：
 
@@ -83,7 +95,7 @@ StackChan 的几点说明：
 
 - **原项目**：[xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)，MIT License，Copyright (c) 2025 xinnan-tech。本项目保留了原项目的 [LICENSE](../LICENSE)。
 - **设备端协议与固件**：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)。
-- **语音识别模型 SenseVoiceSmall**：来自 [FunAudioLLM/SenseVoice](https://github.com/FunAudioLLM/SenseVoice)（阿里巴巴通义实验室），按 [FunASR 模型开源许可协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) 使用。模型由安装脚本从 ModelScope 下载，本仓库不包含模型权重。
+- **语音识别模型 SenseVoiceSmall**：来自 [FunAudioLLM/SenseVoice](https://github.com/FunAudioLLM/SenseVoice)（阿里巴巴通义实验室），按 [FunASR 模型开源许可协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) 使用。默认使用的 int8 版由 [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 转换（Apache-2.0），从 ModelScope 的 `pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue` 下载。模型都由安装脚本下载，本仓库不包含模型权重。
 - **语音活动检测 silero-vad**：[snakers4/silero-vad](https://github.com/snakers4/silero-vad)，MIT License。
 - **Claude Code 接入**：使用 Anthropic 的 [claude-agent-sdk](https://pypi.org/project/claude-agent-sdk/)。需要用户自行安装 Claude Code 并登录。
 - **测试页里的 Live2D 核心库**：`main/digital-human/js/live2d/live2dcubismcore.min.js`，属于 Live2D Inc. 的专有许可，随原项目一起提供，本项目没有修改。

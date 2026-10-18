@@ -11,7 +11,7 @@ tts_audio_prebuffer_count: 15
 
 selected_module:
   VAD: SileroVAD
-  ASR: FunASR
+  ASR: SherpaASR          # 本机 SenseVoice（sherpa-onnx int8 版），不需要 torch；完整安装后也可在后台切换到 FunASR
   LLM: ClaudeCLI          # 安装时根据是否找到 Claude Code 自动选择
   TTS: EdgeTTS
   Memory: nomem

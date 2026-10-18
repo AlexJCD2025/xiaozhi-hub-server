@@ -15,7 +15,7 @@ from pathlib import Path
 from aiohttp import web
 
 from config.logger import setup_logging
-from core.admin import auth, config_store, connections
+from core.admin import auth, config_store, connections, deps
 from core.admin.status import collect_status
 from core.utils.modules_initialize import initialize_modules
 from core.utils.textUtils import EMOJI_MAP
@@ -183,6 +183,8 @@ class AdminHandler:
         section = self._section(request)
         data = config_store.describe_section(await self._blocking(self._merged), section)
         data["running"] = (self.config.get("selected_module") or {}).get(section)
+        for entry in data["entries"]:
+            entry["missing"] = list(await self._blocking(deps.missing_packages, section, entry["type"]))
         return self._json({"ok": True, **data})
 
     async def handle_module_update(self, request: web.Request):
@@ -208,6 +210,10 @@ class AdminHandler:
         name = str(body.get("name") or "")
         try:
             merged = await self._blocking(self._merged)
+            missing = await self._blocking(deps.missing_packages, section, config_store.entry_type(merged, section, name))
+            if missing:
+                return self._error(f"{name} 需要的 Python 包没有安装（{', '.join(missing)}），"
+                                   "请先用完整安装（install.sh --full）", 400)
             await self._blocking(config_store.select_entry, section, name, merged, self.config_path)
         except KeyError:
             return self._error(f"没有名为 {name} 的配置", 404)
