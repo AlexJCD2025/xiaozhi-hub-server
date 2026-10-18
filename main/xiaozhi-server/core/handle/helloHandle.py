@@ -46,10 +46,7 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         format = audio_params.get("format")
         conn.logger.bind(tag=TAG).debug(f"客户端音频格式: {format}")
         conn.audio_format = format
-        # [xiaozhi-hub] 设备 hello 里的采样率是它的麦克风采样率（通常 16000）。服务端回复的应该是
-        # 自己下发语音的采样率（conn.sample_rate，默认 24000），否则设备会把 24k 的语音当 16k 处理并重采样，
-        # 播放时出现"滋滋"声。其余参数沿用设备的。
-        conn.welcome_msg["audio_params"] = {**audio_params, "sample_rate": conn.sample_rate}
+        conn.welcome_msg["audio_params"] = audio_params
     features = msg_json.get("features")
     if features:
         conn.logger.bind(tag=TAG).debug(f"客户端特性: {features}")
