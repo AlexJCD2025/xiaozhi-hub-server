@@ -410,3 +410,26 @@ def test_status_checks_module_packages_and_sherpa_model(tmp_path, monkeypatch):
                         lambda section, type_: ("sherpa_onnx",) if section == "ASR" else ())
     c = check("模块依赖")
     assert c["level"] == "error" and "SherpaASR 缺少 sherpa_onnx" in c["detail"]
+
+
+def test_provider_file_covers_unmanaged_sections():
+    from core.admin import deps
+
+    # 后台不管理的模块也要能找到源文件，自检才能发现手动配置的模块缺依赖
+    assert deps.provider_file("Memory", "nomem").is_file()
+    assert deps.provider_file("Memory", "mem0ai").is_file()
+    assert deps.provider_file("VAD", "silero").is_file()
+    assert deps.provider_file("VLLM", "openai").is_file()
+
+
+def test_status_checks_packages_of_memory_module(tmp_path, monkeypatch):
+    from core.admin import deps
+    from core.admin.status import collect_status
+
+    p = tmp_path / ".config.yaml"
+    p.write_text("selected_module:\n  Memory: mem0ai\n  LLM: ClaudeAPI\n", encoding="utf-8")
+    monkeypatch.setattr(deps, "missing_packages",
+                        lambda section, type_: ("mem0",) if section == "Memory" else ())
+    m = config_store.load_merged(custom_path=p)
+    c = next(c for c in collect_status(m, m)["checks"] if c["name"] == "模块依赖")
+    assert c["level"] == "error" and "mem0ai 缺少 mem0" in c["detail"]

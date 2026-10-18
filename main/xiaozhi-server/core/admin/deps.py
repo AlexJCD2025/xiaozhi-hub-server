@@ -23,7 +23,7 @@ PROJECT_PACKAGES = {"core", "config", "plugins_func"}
 
 def provider_file(section: str, type_: str) -> Path:
     base = Path(get_project_dir()) / "core" / "providers"
-    if section in ("LLM", "Intent"):
+    if section in ("LLM", "Intent", "Memory"):
         return base / section.lower() / type_ / f"{type_}.py"
     return base / section.lower() / f"{type_}.py"
 

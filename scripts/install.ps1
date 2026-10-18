@@ -126,8 +126,12 @@ else {
 if (-not $Full) {
     Push-Location $Server
     $asrType = & $Py -c "from core.admin import config_store; print(config_store.entry_type(config_store.load_merged(), 'ASR'))" 2>$null
-    if ($asrType -eq "fun_local") {
-        if (Ask "当前配置的语音识别是 FunASR，精简安装不包含它。切换到 SherpaASR（同一个 SenseVoice 模型，内存约减半）？" "Y") {
+    & $Py -c "import importlib.util as u, sys; sys.exit(0 if u.find_spec('funasr') else 1)" 2>$null
+    $hasFunasr = ($LASTEXITCODE -eq 0)
+    if ($asrType -eq "fun_local" -and $hasFunasr) {
+        Info "当前语音识别是 FunASR（仍可使用）。改用 SherpaASR 识别准确率相当、内存约减半，可在管理后台的「语音识别」页切换"
+    } elseif ($asrType -eq "fun_local") {
+        if (Ask "当前配置的语音识别是 FunASR，但精简安装没有安装它。切换到 SherpaASR（同一个 SenseVoice 模型）？" "Y") {
             & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaASR', config_store.load_merged())" 2>$null
             if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaASR" } else { Info "切换失败，请在管理后台的「语音识别」页切换" }
         } else { Info "保持 FunASR。需要它时请用完整安装：scripts\install.ps1 -Full" }
