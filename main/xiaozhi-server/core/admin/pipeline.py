@@ -210,8 +210,12 @@ def _llm_params(llm: dict, is_cli: bool) -> list:
 
 # ---------- 提示词拆解 ----------
 
-def _template_text() -> str:
-    path = os.path.join(get_project_dir(), "agent-base-prompt.txt")
+def _template_name(merged: dict) -> str:
+    return str(merged.get("prompt_template") or "hub-base-prompt.txt")
+
+
+def _template_text(merged: dict) -> str:
+    path = os.path.join(get_project_dir(), _template_name(merged))
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
@@ -248,7 +252,7 @@ def _context_values(merged: dict, conn) -> dict:
 
 def render_base_prompt(merged: dict, conn=None) -> str:
     """按原项目的方式渲染基础模板，变量值用标记包起来。"""
-    template = _template_text()
+    template = _template_text(merged)
     persona = str(merged.get("prompt") or "")
     if not template:
         return _mark("base_prompt", persona)
@@ -264,7 +268,6 @@ def describe_prompt(merged: dict) -> dict:
     is_cli = llm.get("type") == "claude_cli"
     conn = _online_conn()
     base = render_base_prompt(merged, conn)
-    persona_default = str(merged.get("prompt") or "").startswith("你是小智/小志，来自中国台湾省")
 
     segments = []
     if is_cli:
@@ -275,11 +278,11 @@ def describe_prompt(merged: dict) -> dict:
                     "这段由 Claude Code 程序自己生成，不在我们的配置里，这里无法显示原文。我们的内容追加在它后面。",
         })
     segments.append({
-        "id": "base", "title": "原项目基础模板（含人设）", "source": "原项目", "when":
+        "id": "base", "title": "基础模板（含人设）", "source": "我们", "when":
             "设备连接时生成；Claude 进程启动时固定" if is_cli else "设备连接时生成；当前时间每轮更新",
         "text": base, "collapsed": False,
-        "note": "来自 agent-base-prompt.txt。高亮的部分是填进去的值：人设来自配置里的 prompt，"
-                "日期、农历、位置、天气在设备连接时查询，当前时间" +
+        "note": f"来自 {_template_name(merged)}。高亮的部分是填进去的值：人设来自配置里的 prompt，"
+                "日期、农历在设备连接时生成，当前时间" +
                 ("在 Claude 进程启动时取一次。" if is_cli else "每轮发送前更新。"),
     })
     if is_cli:
@@ -317,10 +320,8 @@ def describe_prompt(merged: dict) -> dict:
         })
 
     warnings = []
-    if persona_default:
-        warnings.append("人设还是原项目默认的“来自中国台湾省的 00 后女生”。要改的话，编辑配置文件 data/.config.yaml 里的 prompt。")
     if is_cli:
-        warnings.append("提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 5 分钟才关闭）里面的日期、时间、天气不会更新。")
+        warnings.append("提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 5 分钟才关闭）里面的日期、时间不会更新。")
 
     actual = _system_prompt_of(conn) if conn is not None else ""
     return {

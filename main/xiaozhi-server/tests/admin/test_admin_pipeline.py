@@ -70,9 +70,11 @@ def test_prompt_segments_for_claude_cli(cli_path):
     assert [s["id"] for s in p["segments"]] == ["claude_preset", "base", "voice_rules", "turn"]
     base = next(s for s in p["segments"] if s["id"] == "base")["text"]
     found = set(marks(base))
-    assert {"base_prompt", "today_date", "lunar_date", "local_address", "weather_info", "emojiList", "language"} <= found
+    assert {"base_prompt", "today_date", "lunar_date", "emojiList", "language"} <= found
+    assert not {"local_address", "weather_info"} & found  # 默认模板不按 IP 查位置和天气
     assert "<identity>" in base and "语音助手规则" in p["segments"][2]["text"]
-    assert any("台湾" in w for w in p["warnings"]) and any("进程启动时" in w for w in p["warnings"])
+    assert "hub-base-prompt.txt" in next(s for s in p["segments"] if s["id"] == "base")["note"]
+    assert not any("台湾" in w for w in p["warnings"]) and any("进程启动时" in w for w in p["warnings"])
     assert p["actual"] is None  # 没有在线设备
 
 
