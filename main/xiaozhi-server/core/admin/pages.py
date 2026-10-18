@@ -15,7 +15,7 @@ from core.admin import catalog, config_store
 
 CLAUDE_CLI_ENTRY = "ClaudeCLI"
 CLAUDE_EFFORT_VALUES = {"", "low", "medium", "high", "xhigh", "max"}
-CLAUDE_PERMISSION_VALUES = {"default", "acceptEdits", "plan", "bypassPermissions"}
+CLAUDE_PERMISSION_VALUES = {"default", "acceptEdits", "plan", "auto"}
 TOOL_NAME = re.compile(r"^[A-Za-z][\w:.*()\-]*$")
 URL = re.compile(r"^https?://\S+$")
 
@@ -72,6 +72,22 @@ def llm_kind(merged: dict, name: str = None) -> str:
     return "other"
 
 
+def claude_level(entry: dict) -> str:
+    """从配置反推权限级别；工具组合和三档都对不上时返回 custom（手动改过配置）。"""
+    mode = entry.get("permission_mode") or "default"
+    tools = [str(t) for t in entry.get("allowed_tools") or []]
+    core = sorted(t for t in tools if t not in catalog.CLAUDE_WEB_TOOLS)
+    for level in catalog.CLAUDE_LEVELS:
+        if level["mode"] == mode and core == sorted(level["tools"]):
+            return level["value"]
+    return "custom"
+
+
+def claude_web(entry: dict) -> bool:
+    tools = entry.get("allowed_tools") or []
+    return all(t in tools for t in catalog.CLAUDE_WEB_TOOLS)
+
+
 def describe_claude_cli(merged: dict) -> dict:
     entry = _entry(merged, "LLM", CLAUDE_CLI_ENTRY)
     values = {}
@@ -87,11 +103,12 @@ def describe_claude_cli(merged: dict) -> dict:
         "entry": CLAUDE_CLI_ENTRY,
         "exists": entry.get("type") == "claude_cli",
         "values": values,
-        "main_fields": list(catalog.CLAUDE_MAIN_FIELDS),
+        "level": claude_level(entry),
+        "web": claude_web(entry),
         "options": {
             "model": catalog.CLAUDE_MODELS,
             "effort": catalog.CLAUDE_EFFORTS,
-            "permission_mode": catalog.CLAUDE_PERMISSION_MODES,
+            "level": [{k: lv[k] for k in ("value", "label", "desc", "mode", "tools")} for lv in catalog.CLAUDE_LEVELS],
             "tools": catalog.CLAUDE_TOOLS,
         },
     }
@@ -124,12 +141,26 @@ def save_claude_cli(payload: dict, merged: dict, path: Path = None) -> list:
     if entry.get("type") != "claude_cli":
         raise KeyError(CLAUDE_CLI_ENTRY)
     payload = dict(payload or {})
+    # 权限级别和联网开关换算成 permission_mode + allowed_tools
+    if "level" in payload or "web" in payload:
+        level_value = payload.pop("level", None) or claude_level(entry)
+        web = bool(payload.pop("web", claude_web(entry)))
+        if level_value == "custom":
+            tools = [t for t in entry.get("allowed_tools") or [] if t not in catalog.CLAUDE_WEB_TOOLS]
+            mode = entry.get("permission_mode") or "default"
+        else:
+            level = catalog.CLAUDE_LEVEL_BY_VALUE.get(level_value)
+            if level is None:
+                raise ValueError("权限级别只能是 只读、可编辑、Auto")
+            tools, mode = list(level["tools"]), level["mode"]
+        payload["allowed_tools"] = tools + (catalog.CLAUDE_WEB_TOOLS if web else [])
+        payload["permission_mode"] = mode
     if "model" in payload:
         model = str(payload["model"] or "").strip()
         if model and not re.fullmatch(r"[\w.\-\[\]]+", model):
             raise ValueError("模型名称只能包含字母、数字、点和横线，例如 haiku 或 claude-sonnet-5-5")
     if "effort" in payload and str(payload["effort"] or "").strip() not in CLAUDE_EFFORT_VALUES:
-        raise ValueError("思考力度只能是 低、中、高")
+        raise ValueError("思考力度只能是 低、中、高、超高、最高")
     if "permission_mode" in payload and str(payload["permission_mode"] or "").strip() not in CLAUDE_PERMISSION_VALUES:
         raise ValueError("权限模式不支持这个值")
     if "workdir" in payload and not str(payload["workdir"] or "").strip():

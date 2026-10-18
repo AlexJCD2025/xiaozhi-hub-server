@@ -37,19 +37,31 @@ VENDOR_BY_ENTRY = {v["entry"]: v for v in LLM_VENDORS}
 
 # ---------- 大模型：Claude Code CLI ----------
 CLAUDE_MODELS = [
-    {"value": "haiku", "label": "haiku（最快，适合语音）"},
-    {"value": "sonnet", "label": "sonnet（更聪明）"},
-    {"value": "opus", "label": "opus（最强，最慢）"},
+    {"value": "haiku", "label": "Haiku", "hint": "最快，适合语音"},
+    {"value": "sonnet", "label": "Sonnet", "hint": "更聪明"},
+    {"value": "opus", "label": "Opus", "hint": "很强，较慢"},
+    {"value": "fable", "label": "Fable", "hint": "最强，最慢"},
 ]
 CLAUDE_EFFORTS = [
     {"value": "low", "label": "低"},
     {"value": "medium", "label": "中"},
     {"value": "high", "label": "高"},
+    {"value": "xhigh", "label": "超高", "slow": True},
+    {"value": "max", "label": "最高", "slow": True},
 ]
-CLAUDE_PERMISSION_MODES = [
-    {"value": "default", "label": "默认（只能用允许的工具）"},
-    {"value": "acceptEdits", "label": "自动接受改文件"},
+# 权限级别：决定开放哪些工具，以及 Claude Code 的权限模式
+CLAUDE_READ_TOOLS = ["Read", "Grep", "Glob"]
+CLAUDE_WEB_TOOLS = ["WebSearch", "WebFetch"]
+CLAUDE_LEVELS = [
+    {"value": "read", "label": "只读", "mode": "default", "tools": CLAUDE_READ_TOOLS,
+     "desc": "只能查看、搜索工作目录里的文件"},
+    {"value": "edit", "label": "可编辑", "mode": "acceptEdits", "tools": CLAUDE_READ_TOOLS + ["Write", "Edit"],
+     "desc": "还能在工作目录里新建、修改文件，自动通过"},
+    {"value": "auto", "label": "Auto", "mode": "auto",
+     "tools": CLAUDE_READ_TOOLS + ["Write", "Edit", "Bash", "TodoWrite"],
+     "desc": "还能执行命令等，由 Claude Code 自己判断：低风险的自动放行，需要确认的一律不执行"},
 ]
+CLAUDE_LEVEL_BY_VALUE = {lv["value"]: lv for lv in CLAUDE_LEVELS}
 CLAUDE_TOOLS = [
     {"name": "Read", "label": "读文件", "risky": False},
     {"name": "Grep", "label": "搜内容", "risky": False},
@@ -59,9 +71,8 @@ CLAUDE_TOOLS = [
     {"name": "Bash", "label": "执行命令", "risky": True},
     {"name": "Write", "label": "写文件", "risky": True},
     {"name": "Edit", "label": "改文件", "risky": True},
+    {"name": "TodoWrite", "label": "记待办", "risky": False},
 ]
-# 主表单里的字段；其余字段放在"高级设置"里
-CLAUDE_MAIN_FIELDS = ("model", "effort", "workdir", "allowed_tools", "first_reply_filler")
 
 # ---------- 语音合成：EdgeTTS 中文音色 ----------
 EDGE_VOICES = [
