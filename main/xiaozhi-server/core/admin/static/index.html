@@ -209,6 +209,14 @@
   .branch { padding: 12px 14px; }
   .branch b { display: block; font-size: 13px; margin-bottom: 2px; }
   .branch span { color: var(--muted); font-size: 13px; }
+  .timeline { display: grid; gap: 10px; }
+  .tl-step { display: grid; grid-template-columns: 10em minmax(0, 1fr); gap: 16px; padding: 14px 18px; }
+  .tl-step .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; margin-right: 6px;
+                background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
+  .tl-step b { font-size: 14px; }
+  .tl-step small { display: block; color: var(--muted); font-size: 12px; margin: 4px 0 0 28px; }
+  .tl-step ul { margin: 0; padding-left: 18px; font-size: 13px; }
+  .tl-step li + li { margin-top: 4px; }
   .msgs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .msg { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--soft); font-size: 12px; }
   .msg code { color: var(--accent); font-size: 12px; }
@@ -254,6 +262,7 @@
     .choices, .grid2, .grid3, .plugins, .branches, .levels { grid-template-columns: 1fr; }
     .cli-row { grid-template-columns: 1fr; gap: 6px; } .cli-k { padding-top: 0; }
     .flow { flex-direction: column; overflow: visible; }
+    .tl-step { grid-template-columns: 1fr; gap: 8px; }
     .arrow { transform: rotate(90deg); }
     .params > div { grid-template-columns: 1fr; gap: 2px; }
     .tiles { grid-template-columns: 1fr 1fr; }
@@ -534,6 +543,10 @@ async function renderHow(root) {
   const plain = (text) => text.replace(markRe, (_, name, value) => value);
   root.innerHTML = `
     <div class="page-head"><div><h1>工作原理</h1><p class="sub">对设备说一句话之后，服务端每一步做了什么。内容按当前配置生成，修改设置后会跟着变。</p></div></div>
+    <div class="section-title">一次对话的完整经过 <span class="muted small" style="font-weight:400">从唤醒到断开</span></div>
+    <div class="timeline">${f.timeline.map((t, i) => `<div class="card tl-step">
+      <div><span class="n">${i + 1}</span><b>${esc(t.title)}</b><small>${esc(t.who)}</small></div>
+      <ul>${t.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>
     <div class="section-title">一句话的旅程 <span class="muted small" style="font-weight:400">点每一步看细节</span></div>
     <div class="flow">${f.stages.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}
       <button class="stage ${s.id === howStage ? "on" : ""}" data-stage="${s.id}">
@@ -887,7 +900,8 @@ async function renderCallNames(root) {
   const labelOf = (entry) => (d.targets.find((t) => t.entry === entry) || models.find((m) => m.entry === entry) || { label: entry }).label;
   setOnline(devices);
   root.innerHTML = `
-    <div class="page-head"><div><h1>呼名</h1><p class="sub">唤醒设备后，句子开头说“嗨 + 称呼”，就换成对应的模型回答；之后直接说话也交给它，直到叫别的称呼。每个模型只记得跟自己的对话。</p></div>
+    <div class="page-head"><div><h1>呼名</h1><p class="sub">唤醒设备后，句子开头说“嗨 + 称呼”，就换成对应的模型回答；之后直接说话也交给它，直到叫别的称呼。每个模型只记得跟自己的对话。
+      只说称呼时只切换模型、回一声“${esc(d.reply)}”，不启动 Claude；说出第一句话时才启动，并判断要不要接上次的对话。完整经过见<a href="#how">工作原理</a>。</p></div>
       <span class="pill ${d.enabled ? "ok" : ""}">${d.enabled ? "已开启" : "已关闭"}</span></div>
     <div class="card panel">
       <label class="switch" style="margin-top:0"><input type="checkbox" id="cn-enabled" ${d.enabled ? "checked" : ""}><span>开启呼名</span>

@@ -11,7 +11,7 @@ from datetime import datetime
 from jinja2 import Template
 
 from config.config_loader import get_project_dir
-from core.admin import catalog, config_store, connections
+from core.admin import catalog, config_store, connections, pages
 
 # 变量标记：\x01变量名\x02值\x03，前端换成高亮
 MARK_START, MARK_SEP, MARK_END = "\x01", "\x02", "\x03"
@@ -87,6 +87,7 @@ def describe_flow(merged: dict) -> dict:
     intent_name, intent = _entry(merged, "Intent")
     intent_type = intent.get("type", intent_name)
     is_cli = llm.get("type") == "claude_cli"
+    calls = pages.describe_call_names(merged)
     prebuffer = int(merged.get("tts_audio_prebuffer_count") or 5)
     silence = vad.get("min_silence_duration_ms", 1000)
 
@@ -115,11 +116,14 @@ def describe_flow(merged: dict) -> dict:
         {
             "id": "intent", "title": "意图识别", "module": "不用插件" if intent_type == "nointent" else
             "用插件" if intent_type == "function_call" else intent_name, "icon": "🧭",
-            "summary": "先检查退出指令和唤醒词",
-            "params": [
-                {"label": "第 1 步：退出指令", "value": f"整句话是 {'、'.join(merged.get('exit_commands') or [])} 时直接断开，不经过大模型"},
-                {"label": "第 2 步：唤醒词", "value": "整句话是唤醒词时，播放缓存的回复，不经过大模型"},
-                {"label": "第 3 步：意图", "value":
+            "summary": "先处理呼名、退出指令和唤醒词" if calls["enabled"] else "先检查退出指令和唤醒词",
+            "params": ([
+                {"label": "呼名", "value": f"句首是“嗨 + 称呼”时去掉称呼，把这台设备切到对应的模型并记住；"
+                                         f"只说称呼时直接回“{calls['reply']}”，不经过大模型"},
+            ] if calls["enabled"] else []) + [
+                {"label": "退出指令", "value": f"整句话是 {'、'.join(merged.get('exit_commands') or [])} 时直接断开，不经过大模型"},
+                {"label": "唤醒词", "value": "整句话是唤醒词时，播放缓存的回复，不经过大模型"},
+                {"label": "意图", "value":
                     "不用插件：直接交给大模型" if intent_type == "nointent" else
                     "用插件：把插件当作工具清单交给大模型，由它决定要不要调用；一轮最多连续调用 5 次工具"
                     if intent_type == "function_call" else f"{intent_name}：先用一个模型判断要不要调插件"},
@@ -163,7 +167,9 @@ def describe_flow(merged: dict) -> dict:
         },
     ]
 
-    branches = [
+    branches = ([
+        {"title": "只说称呼", "text": f"只说“嗨 + 称呼”时，服务端切换模型后直接回“{calls['reply']}”，不经过大模型，也不启动 Claude Code 进程"},
+    ] if calls["enabled"] else []) + [
         {"title": "唤醒词", "text": "说唤醒词（例如“嘿，你好呀”）时不经过大模型，直接播放缓存的回复，例如“您请说，我正听着。”"},
         {"title": "退出指令", "text": f"整句话是“{'”“'.join(merged.get('exit_commands') or [])}”时立即断开连接，没有回复"},
         {"title": "长时间不说话", "text": f"{merged.get('close_connection_no_voice_time', 120)} 秒没人说话，大模型说一句告别语后断开"},
@@ -184,7 +190,81 @@ def describe_flow(merged: dict) -> dict:
         {"type": "（Opus 语音包）", "text": "每包 60ms"},
         {"type": "tts · stop", "text": "说完了，设备回到收音"},
     ]
-    return {"stages": stages, "branches": branches, "messages": messages}
+    return {"stages": stages, "branches": branches, "messages": messages,
+            "timeline": describe_timeline(merged, calls)}
+
+
+def _duration(seconds) -> str:
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return str(seconds)
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = int(seconds // 60)
+        return f"{minutes // 60} 小时" if minutes % 60 == 0 else f"{minutes} 分钟"
+    return f"{int(seconds)} 秒"
+
+
+def describe_timeline(merged: dict, calls: dict) -> list:
+    """从唤醒到断开，一次对话的完整经过。每一步标出是设备还是服务端在做，时长等参数从配置读取。"""
+    llms = merged.get("LLM") or {}
+    default_name = (merged.get("selected_module") or {}).get("LLM")
+    default_label = _llm_label(default_name, llms.get(default_name) or {})
+    called = [m["entry"] for m in calls["models"]] if calls["enabled"] else []
+    cli_names = [n for n in [default_name, *called]
+                 if isinstance(llms.get(n), dict) and llms[n].get("type") == "claude_cli"]
+    has_api = any(isinstance(llms.get(n), dict) and llms[n].get("type") != "claude_cli" for n in [default_name, *called])
+    cli = llms[cli_names[0]] if cli_names else {}
+    window = cli.get("resume_window_minutes", 120)
+    idle = cli.get("idle_timeout_seconds", 300)
+    keywords = "”“".join(cli.get("resume_keywords") or ["接着上次聊", "继续上次的话题", "继续刚才的话题", "接着刚才聊"])
+    reply = calls["reply"]
+
+    wake = [
+        "说“Hi, StackChan”：唤醒词由设备自己识别（固件里），不经过服务端",
+        "设备连上本地服务，并把唤醒词当作一句话发过来（StackChan 固定发“嘿，你好呀”）；"
+        "服务端认出是唤醒词，播放缓存的问候，不经过大模型",
+        "点一下屏幕也能唤醒：设备直接开始收音，没有问候",
+    ]
+    wake.append(f"服务端把这台设备切到它上次用的模型（第一次连上的设备用默认模型 {default_label}）；这时还不启动 Claude Code 进程"
+                if calls["enabled"] else f"所有话都交给默认模型 {default_label}；这时还不启动 Claude Code 进程")
+    steps = [{"title": "唤醒", "who": "设备 → 服务端", "items": wake}]
+
+    if calls["enabled"]:
+        names = "；".join(f"{m['label']}：{'、'.join(m['aliases'])}" for m in calls["models"])
+        steps.append({"title": "叫模型（可选）", "who": "服务端", "items": [
+            f"只说“嗨 + 称呼”：切到这个模型并记住，回一声“{reply}”，不启动 Claude Code 进程",
+            "“嗨 + 称呼 + 内容”：去掉称呼，把内容交给这个模型",
+            "不说称呼：交给这台设备上次用的模型",
+            f"现在的称呼 —— {names}" if names else "还没有配置称呼",
+        ]})
+
+    first = []
+    if cli_names:
+        first += [
+            "交给 Claude 时，这一刻才启动 Claude Code 进程，同时决定接上旧会话还是新开",
+            f"说的是“{keywords}”：接回上次的会话，不管隔了多久",
+            f"普通的话：距上次对话不超过 {_duration(float(window) * 60)} 就自动接上，否则新开会话",
+            "接续指令后面还带着内容时（如“接着上次聊那个 bug”），接上后把整句交给 Claude",
+        ]
+    if has_api:
+        first.append("交给 API 模型时：对话只在这次连接内有效，断开后清空，接续指令会当普通的话交给模型")
+    steps.append({"title": "第一句话", "who": "服务端", "items": first or ["交给当前模型"]})
+
+    during = ["后面每句话直接交给当前模型" + ("；Claude Code 进程已在运行，不再判断接续" if cli_names else "")]
+    if calls["enabled"]:
+        during.append("说“嗨 + 别的称呼”随时换模型；每个模型只记得跟自己的对话，切回来接着原来的聊")
+    during.append("打断：设备说话时点一下屏幕上的脸，或说唤醒词")
+    steps.append({"title": "对话中", "who": "服务端", "items": during})
+
+    end = [f"{_duration(merged.get('close_connection_no_voice_time', 120))}没人说话：说一句告别语后断开"]
+    if cli_names:
+        end.append(f"Claude Code 进程空闲 {_duration(idle)}或设备断开时关闭；切到别的模型后不马上关，等空闲超时再关，方便切回来")
+        end.append("进程因空闲关闭后再说话：重新启动进程，按“第一句话”的规则判断接续")
+    if calls["enabled"]:
+        end.append("下次唤醒：还是上次用的模型" + ("，接续规则同上" if cli_names else ""))
+    steps.append({"title": "结束", "who": "服务端", "items": end})
+    return steps
 
 
 def _llm_params(llm: dict, is_cli: bool) -> list:
