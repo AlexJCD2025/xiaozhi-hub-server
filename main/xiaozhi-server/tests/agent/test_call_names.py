@@ -9,7 +9,8 @@ from core.agent import call_names, llm_router
 from core.agent.call_names import handle_call_name, match_call_name
 
 
-@pytest.mark.parametrize("asr_text", ["Hi, cloud.", "Hi, cloud. Hi, cloud.", "High cloud.", "嗨 Claude", "hey，克劳德！"])
+@pytest.mark.parametrize("asr_text", ["Hi, cloud.", "Hi, cloud. Hi, cloud.", "High cloud.", "嗨 Claude", "hey，克劳德！",
+                                      "He cloud.", "Heい cloud。", "Hei cloud"])  # "嘿"被识别成 he（真机实测）
 def test_only_call_name(asr_text):
     assert match_call_name(asr_text) == ("ClaudeCLI", "")
 
@@ -36,6 +37,8 @@ def test_call_name_with_content(asr_text, rest):
     "嗨cloud code现在是什么版本？",     # 问的是 Claude Code，不是在叫 Claude
     "嗨 Claude Code 怎么安装",
     "今天嗨 cloud 一下",               # 不在句首
+    "Hello cloud",                    # hello 不是招呼语 he
+    "Help cloud 怎么用",
     "",
 ])
 def test_not_call_name(asr_text):
@@ -140,7 +143,7 @@ async def test_handle_disabled_and_custom_reply(spoken):
 
 @pytest.mark.parametrize("asr_text, alias", [
     ("嗨cloud。", "cloud"), ("Hi, cloud. Hi, cloud.", "cloud"), ("High cloud.", "cloud"),
-    ("hicloud", "cloud"), ("嘿 克劳德！", "克劳德"), ("克劳德", "克劳德"), ("嗨。", ""),
+    ("hicloud", "cloud"), ("嘿 克劳德！", "克劳德"), ("Heい cloud。", "cloud"), ("He cloud.", "cloud"), ("克劳德", "克劳德"), ("嗨。", ""),
 ])
 def test_extract_alias(asr_text, alias):
     assert call_names.extract_alias(asr_text) == alias

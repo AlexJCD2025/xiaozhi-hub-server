@@ -24,7 +24,9 @@ TAG = __name__
 DEFAULT_MODELS = {"ClaudeCLI": ["claude", "cloud", "clod", "clot", "克劳德"]}
 DEFAULT_REPLY = "我在，请说"
 
-_PREFIXES = ["hiigh", "high", "hey", "hai", "hi", "嗨", "嘿"]
+# "嘿"常被识别成 he，有时后面还带一个日文假名（实测 "He cloud."、"Heい cloud。"）
+_PREFIXES = ["hiigh", "high", "hey", "hei", "hai", "hi", "he", "嗨", "嘿"]
+_PREFIX = "(?:" + "|".join(_PREFIXES) + r")[\u3040-\u30ff]*"
 _SEP = r"[\s,，.。!！?？、~～]*"
 
 
@@ -42,7 +44,7 @@ def _aliases(value) -> list:
 
 
 def _build(models: dict) -> list:
-    prefix = "(?:" + "|".join(_PREFIXES) + ")"
+    prefix = _PREFIX
     result = []
     for model, value in models.items():
         aliases = _aliases(value)
@@ -79,7 +81,7 @@ def extract_alias(text: str) -> str:
 
     例如 "嗨cloud。" → "cloud"，"Hi, cloud. Hi, cloud." → "cloud"，"克劳德" → "克劳德"。
     """
-    rest = re.sub(r"^" + _SEP + "(?:" + "|".join(_PREFIXES) + ")" + _SEP, "", (text or "").strip(), count=1,
+    rest = re.sub(r"^" + _SEP + _PREFIX + _SEP, "", (text or "").strip(), count=1,
                   flags=re.IGNORECASE)
     rest = re.sub(r"^" + _SEP, "", rest)
     return re.split(_SEP.replace("*", "+"), rest, maxsplit=1)[0].strip().lower()
