@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -81,6 +81,24 @@ def find_claude_cli(configured: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def claude_cli_version(cli_path: str, timeout: float = 15) -> str:
+    """运行 `claude --version`，返回第一行非空输出；失败时抛出异常。"""
+    out = subprocess.run([cli_path, "--version"], capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    lines = [l.strip() for l in (out.stdout or out.stderr or "").splitlines() if l.strip()]
+    return lines[0] if lines else ""
+
+
+def _num(config: dict, key: str, default: float) -> float:
+    """读取数字配置。只有没填（None 或空字符串）才用默认值，填 0 就是 0。"""
+    value = config.get(key)
+    if value is None or str(value).strip() == "":
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 @dataclass
 class ConnState:
     key: str  # 设备 ID；没有时退回连接的 session_id
@@ -89,7 +107,8 @@ class ConnState:
     lock: Optional[asyncio.Lock] = None
     idle_handle: Optional[asyncio.TimerHandle] = None
     intent_warned: bool = False
-    extra: dict = field(default_factory=dict)
+    closed: bool = False  # 连接已关闭：不再启动或保留 Claude Code 进程
+    turn_gen: int = 0  # 每开始一轮加 1，用于让过期的空闲定时器失效
 
 
 class LLMProvider(LLMProviderBase):
@@ -107,14 +126,15 @@ class LLMProvider(LLMProviderBase):
             # 默认 low：语音场景以快速应答为主，实测工具类问题从约 6 秒降到约 4 秒
             effort=str(config.get("effort", "low") or "").strip() or None,
         )
-        self.turn_timeout = float(config.get("turn_timeout_seconds") or 120)
+        # 超时类配置填 0 表示不限制
+        self.turn_timeout = _num(config, "turn_timeout_seconds", 120) or float("inf")
         # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住
-        self.stall_timeout = float(config.get("stall_timeout_seconds") or 30)
-        self.idle_timeout = float(config.get("idle_timeout_seconds") or 300)
-        self.resume_window = float(config.get("resume_window_minutes") or 120)
+        self.stall_timeout = _num(config, "stall_timeout_seconds", 30) or float("inf")
+        self.idle_timeout = _num(config, "idle_timeout_seconds", 300)  # 0：每轮结束就关闭进程
+        self.resume_window = _num(config, "resume_window_minutes", 120)  # 0：不自动接续
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
         self.filler = single_sentence(config.get("first_reply_filler", "好的，我看一下"))
-        self.filler_delay = float(config.get("filler_delay_seconds") or 2)
+        self.filler_delay = _num(config, "filler_delay_seconds", 2)
         self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
 
         self._states: Dict[str, ConnState] = {}
@@ -131,10 +151,8 @@ class LLMProvider(LLMProviderBase):
             logger.bind(tag=TAG).error("未找到 claude 命令，请先安装 Claude Code 并登录，或在配置中指定 cli_path")
             return
         try:
-            out = subprocess.run([self.cli_path, "--version"], capture_output=True, text=True,
-                                 encoding="utf-8", timeout=15)
             logger.bind(tag=TAG).info(
-                f"Claude Code: {out.stdout.strip() or out.stderr.strip()} ({self.cli_path})，"
+                f"Claude Code: {claude_cli_version(self.cli_path)} ({self.cli_path})，"
                 f"工作目录 {self.session_config.workdir}，允许工具 {self.session_config.allowed_tools}，"
                 f"思考力度 {self.session_config.effort or '默认'}"
             )
@@ -166,6 +184,7 @@ class LLMProvider(LLMProviderBase):
         with self._states_lock:
             st = self._states.pop(conn.session_id, None)
         if st:
+            st.closed = True
             asyncio.run_coroutine_threadsafe(self._close_agent(st, "连接关闭"), self._loop)
 
     # ---------- 后台循环中的逻辑 ----------
@@ -182,10 +201,25 @@ class LLMProvider(LLMProviderBase):
     def _schedule_idle_close(self, st: ConnState) -> None:
         if st.idle_handle:
             st.idle_handle.cancel()
+        gen = st.turn_gen
         st.idle_handle = self._loop.call_later(
-            self.idle_timeout,
-            lambda: asyncio.ensure_future(self._close_agent(st, f"空闲 {int(self.idle_timeout)} 秒")),
+            self.idle_timeout, lambda: asyncio.ensure_future(self._idle_close(st, gen))
         )
+
+    async def _idle_close(self, st: ConnState, gen: int) -> None:
+        async with st.lock:
+            if st.turn_gen != gen:
+                return  # 定时器触发前已经开始了新的一轮
+            st.idle_handle = None
+            await self._close_agent(st, f"空闲 {int(self.idle_timeout)} 秒")
+
+    async def _abandon_if_stuck(self, st: ConnState, gen: int, grace: float = 5) -> None:
+        """超时后已发送中断；如果这一轮过了 grace 秒还没结束，说明 Claude Code 卡死了，直接结束进程。
+        下一轮会自动重新启动进程（在接续窗口内会接续原会话）。"""
+        await asyncio.sleep(grace)
+        if st.turn_gen == gen and st.lock is not None and st.lock.locked() and st.agent:
+            logger.bind(tag=TAG).warning("中断后 Claude Code 仍未结束本轮，强制关闭进程")
+            await self._close_agent(st, "中断无效")
 
     async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
         """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。"""
@@ -203,12 +237,15 @@ class LLMProvider(LLMProviderBase):
             if e.kind != ErrorKind.SESSION_MISSING:
                 raise
             logger.bind(tag=TAG).warning(f"接续会话 {resume_id} 失败，改为新开会话")
+            agent = ClaudeSession(cfg, logger=logger.bind(tag=TAG))
+            await agent.start()  # 新会话也启动失败时（如未登录、网络问题）保留旧记录，下次还能接续
             self.store.forget(st.key)
             if keyword:
                 out.put(TextDelta("😶没有找到之前的对话，我们重新开始吧。"))
-            agent = ClaudeSession(cfg, logger=logger.bind(tag=TAG))
-            await agent.start()
             resume_id, reason = None, "resume_failed"
+        if st.closed:
+            await agent.close()  # 启动期间连接已经关闭
+            raise AgentSessionError(ErrorKind.PROCESS_EXITED, "连接已关闭")
         st.agent = agent
         logger.bind(tag=TAG).info(
             f"Claude Code 进程已启动（{time.time() - t0:.1f}s），设备 {st.key}，"
@@ -227,8 +264,10 @@ class LLMProvider(LLMProviderBase):
         if st.lock is None:
             st.lock = asyncio.Lock()
         async with st.lock:
+            st.turn_gen += 1
             if st.idle_handle:
                 st.idle_handle.cancel()
+                st.idle_handle = None
             try:
                 if await self._ensure_agent(st, text, out, system_prompt):
                     self.store.touch(st.key, st.agent.session_id)
@@ -245,7 +284,7 @@ class LLMProvider(LLMProviderBase):
                 logger.bind(tag=TAG).exception(f"Claude Code 处理出错: {e}")
                 out.put(Error(ErrorKind.UNKNOWN, str(e)))
             finally:
-                if st.agent:
+                if st.agent and not st.closed:
                     self._schedule_idle_close(st)
 
     # ---------- 服务端调用的同步接口 ----------
@@ -283,6 +322,7 @@ class LLMProvider(LLMProviderBase):
                         )
                         if st.agent:
                             asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+                            asyncio.run_coroutine_threadsafe(self._abandon_if_stuck(st, st.turn_gen), self._loop)
                         prefix = "" if (first_at is not None or filler_sent) else "😶"
                         yield prefix + Error(kind).voice_message
                         finished = True

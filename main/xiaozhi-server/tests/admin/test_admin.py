@@ -261,3 +261,50 @@ async def test_devices_and_emotion_test(client):
         assert (await client.post("/admin/api/devices/none/emotion-test", json={})).status == 404
     finally:
         connections.unregister(fake)
+
+
+def test_authorization_like_fields_are_secret():
+    for key in ("authorization", "api_token", "refresh_token", "cookie", "credential"):
+        assert config_store.field_kind(key, "Bearer abc") == "secret", key
+    assert config_store.field_kind("max_tokens", 500) == "number"
+    assert config_store.field_kind("max_new_tokens", "1024") == "text"
+
+
+async def test_emotion_test_rejects_bad_interval_and_survives_disconnect(client):
+    from types import SimpleNamespace
+    from core.admin import connections
+
+    await client.post("/admin/api/setup", json={"password": "pass-1234"})
+
+    class BrokenWS:
+        async def send(self, data):
+            raise ConnectionError("closed")
+
+    fake = SimpleNamespace(session_id="s-2", device_id="dev-2", client_ip="x", websocket=BrokenWS())
+    connections.register(fake)
+    try:
+        assert (await client.post("/admin/api/devices/s-2/emotion-test", json={"interval": "abc"})).status == 400
+        r = await client.post("/admin/api/devices/s-2/emotion-test", json={"interval": 1})
+        assert r.status == 200  # 发送失败只记日志，不产生未处理的任务异常
+        import asyncio
+        for _ in range(20):
+            await asyncio.sleep(0)
+    finally:
+        connections.unregister(fake)
+
+
+async def test_apply_failure_keeps_running_config(cfg_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from core.admin import admin_handler as ah
+
+    def boom(*a, **k):
+        raise RuntimeError("load failed")
+    monkeypatch.setattr(ah, "initialize_modules", boom)
+    ws = SimpleNamespace(config_lock=asyncio.Lock(), _llm="old-llm")
+    running = {"selected_module": {"LLM": "ClaudeAPI"}, "LLM": {"ClaudeAPI": {"type": "openai"}}}
+    h = ah.AdminHandler(running, ws_server=ws, config_path=cfg_path)
+    config_store.select_entry("LLM", "ChatGLMLLM", config_store.load_merged(custom_path=cfg_path), cfg_path)
+    result = await h._apply("LLM")
+    assert result["applied"] is False
+    assert running["selected_module"]["LLM"] == "ClaudeAPI" and ws._llm == "old-llm"  # 失败时服务保持原状

@@ -208,7 +208,7 @@ class ClaudeSession(AgentSession):
             await self._client.query(text)
             async for msg in self._client.receive_response():
                 self._log_message(msg)
-                is_text = isinstance(msg, StreamEvent) and (msg.event or {}).get("delta", {}).get("type") == "text_delta"
+                is_text = isinstance(msg, StreamEvent) and ((msg.event or {}).get("delta") or {}).get("type") == "text_delta"
                 if not is_text and time.monotonic() - last_activity >= 1:
                     last_activity = time.monotonic()
                     yield Activity(type(msg).__name__)  # 节流：每秒最多一次
@@ -253,7 +253,8 @@ class ClaudeSession(AgentSession):
                     return
             yield Done(session_id=self._session_id, interrupted=self._interrupting)
         except ClaudeSDKError as e:
-            self._client = None
+            # 有些错误（如输出解析失败）发生时进程还活着，必须关掉，否则会留下孤儿进程
+            await self.close()
             yield Error(ErrorKind.PROCESS_EXITED, f"{e}\n{self.stderr_tail}".strip())
         finally:
             self._interrupting = False

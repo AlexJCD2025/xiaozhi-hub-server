@@ -42,5 +42,5 @@ LLM:
     model_name: claude-haiku-5-5
     api_key: 你的Claude API Key
     max_tokens: 500
-    extra_body:
-      reasoning_effort: none        # 关闭隐藏思考，否则首字慢且可能没有回复
+    # 直连 api.anthropic.com 时会自动关闭思考；经第三方代理访问时，如果首字很慢或没有回复，
+    # 可在管理后台为这一项添加 extra_body，例如 {"reasoning_effort": "none"}
