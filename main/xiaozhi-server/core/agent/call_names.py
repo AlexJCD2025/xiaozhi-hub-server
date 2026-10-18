@@ -3,12 +3,14 @@
 称呼在交给模型前去掉；整句话只有称呼时，回一句固定的话，不发给模型，也不启动 Claude Code 进程，
 这样下一句"接着上次聊"仍然是这个模型的第一句话，照常接续。
 
-别名来自实测（工作空间 asr-test/call-names）：语音识别把 Claude 全部识别成 "cloud"，
-把"嗨"识别成 嗨/嘿/hi/hey/high/hiigh。第一期只支持 Claude，Grok、Codex 识别不稳定，暂不支持。
+默认别名来自实测（工作空间 asr-test/call-names）：语音识别把 Claude 全部识别成 "cloud"，
+把"嗨"识别成 嗨/嘿/hi/hey/high/hiigh。别名也可以在管理后台管理：开启"录入"后对着设备说几遍，
+把语音识别实际听到的结果存成别名（Learner）。目前只支持 Claude。
 """
 
 import asyncio
 import re
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -71,11 +73,98 @@ def match_call_name(text: str, models: dict = None):
     return found, rest.strip()
 
 
-async def handle_call_name(conn: "ConnectionHandler", text: str):
-    """在意图识别和大模型之前处理称呼。
+def extract_alias(text: str) -> str:
+    """从一次录入的识别结果里取出称呼：去掉开头的"嗨/hi"等和标点，取到下一个停顿为止。
 
-    返回 None 表示这句话已经处理完（只有称呼，已回复）；否则返回要交给模型的文字（没有称呼时原样返回）。
+    例如 "嗨cloud。" → "cloud"，"Hi, cloud. Hi, cloud." → "cloud"，"克劳德" → "克劳德"。
     """
+    rest = re.sub(r"^" + _SEP + "(?:" + "|".join(_PREFIXES) + ")" + _SEP, "", (text or "").strip(), count=1,
+                  flags=re.IGNORECASE)
+    rest = re.sub(r"^" + _SEP, "", rest)
+    return re.split(_SEP.replace("*", "+"), rest, maxsplit=1)[0].strip().lower()
+
+
+class Learner:
+    """录入模式：管理后台开启后，接下来设备说的几句话不交给模型，只记录语音识别的结果，作为候选别名。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._state = None
+
+    def start(self, session_id=None, count: int = 3, timeout: float = 90) -> None:
+        with self._lock:
+            self._state = {"session_id": session_id, "count": count, "until": time.time() + timeout, "samples": []}
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._state:
+                self._state["until"] = 0
+
+    def status(self) -> dict:
+        with self._lock:
+            st = self._state
+            if not st:
+                return {"active": False, "samples": [], "count": 0, "session_id": None, "seconds_left": 0}
+            left = max(0, int(st["until"] - time.time()))
+            active = left > 0 and len(st["samples"]) < st["count"]
+            return {"active": active, "samples": list(st["samples"]), "count": st["count"],
+                    "session_id": st["session_id"], "seconds_left": left if active else 0}
+
+    def capture(self, session_id: str, text: str):
+        """录入中且是目标设备时记下这句话，返回 (第几遍, 一共几遍)；否则返回 None。"""
+        with self._lock:
+            st = self._state
+            if not st or time.time() > st["until"] or len(st["samples"]) >= st["count"]:
+                return None
+            if st["session_id"] and st["session_id"] != session_id:
+                return None
+            st["samples"].append({"text": text, "alias": extract_alias(text)})
+            return len(st["samples"]), st["count"]
+
+
+learner = Learner()
+
+
+async def _speak(conn: "ConnectionHandler", heard: str, reply: str) -> bool:
+    """不经过大模型，直接回一句话。TTS 还没就绪时返回 False。"""
+    from core.handle.intentHandler import speak_txt
+    from core.handle.sendAudioHandle import send_stt_message
+    from core.utils.dialogue import Message
+
+    # 刚连上时 TTS 可能还在初始化（和唤醒词回复一样，最多等 3 秒）
+    deadline = time.monotonic() + 3
+    while not conn.tts and time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+    if not conn.tts:
+        return False
+    await send_stt_message(conn, heard)
+    conn.client_abort = False
+    conn.sentence_id = str(uuid.uuid4().hex)
+    conn.dialogue.put(Message(role="user", content=heard))
+    speak_txt(conn, reply)
+    return True
+
+
+def _is_wakeup_word(conn: "ConnectionHandler", text: str) -> bool:
+    from core.utils.util import remove_punctuation_and_length
+
+    _, filtered = remove_punctuation_and_length(text)
+    return filtered in (conn.config.get("wakeup_words") or [])
+
+
+async def handle_call_name(conn: "ConnectionHandler", text: str):
+    """在意图识别和大模型之前处理称呼（以及管理后台开启的录入）。
+
+    返回 None 表示这句话已经处理完（录入了一遍，或只有称呼，已回复）；否则返回要交给模型的文字。
+    """
+    if not text.lstrip().startswith("{") and not _is_wakeup_word(conn, text):
+        got = learner.capture(getattr(conn, "session_id", None), text)
+        if got:
+            n, total = got
+            conn.logger.bind(tag=TAG).info(f"呼名录入 第 {n}/{total} 遍：{text}")
+            await _speak(conn, text, f"收到第 {n} 遍" if n < total else "录好了，请到管理后台确认")
+            return None
+
     cfg = conn.config.get("call_names") or {}
     if not cfg.get("enabled", True):
         return text
@@ -87,23 +176,9 @@ async def handle_call_name(conn: "ConnectionHandler", text: str):
         conn.logger.bind(tag=TAG).info(f"呼名 {model}：去掉称呼后交给模型：{rest}")
         return rest
 
-    from core.handle.intentHandler import speak_txt
-    from core.handle.sendAudioHandle import send_stt_message
-    from core.utils.dialogue import Message
-
-    # 刚连上时 TTS 可能还在初始化（和唤醒词回复一样，最多等 3 秒）
-    deadline = time.monotonic() + 3
-    while not conn.tts and time.monotonic() < deadline:
-        await asyncio.sleep(0.1)
-    if not conn.tts:
+    reply = cfg.get("reply") or DEFAULT_REPLY
+    if not await _speak(conn, text, reply):
         conn.logger.bind(tag=TAG).warning("呼名：TTS 尚未就绪，无法回复，按普通对话处理")
         return text
-
-    reply = cfg.get("reply") or DEFAULT_REPLY
     conn.logger.bind(tag=TAG).info(f"呼名 {model}：只有称呼，直接回复：{reply}")
-    await send_stt_message(conn, text)
-    conn.client_abort = False
-    conn.sentence_id = str(uuid.uuid4().hex)
-    conn.dialogue.put(Message(role="user", content=text))
-    speak_txt(conn, reply)
     return None
