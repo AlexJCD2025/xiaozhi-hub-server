@@ -118,6 +118,8 @@ if _CUSTOM_CONFIG.exists():
 
 # 永远走文件合并：单模块直接用
 CONFIG: dict = _load_via_file_merge()
+# [xiaozhi-hub] 测试日志写到单独的文件，不混进服务的 tmp/server.log（测试里的假报错会误导排查）
+CONFIG.setdefault("log", {})["log_file"] = "pytest.log"
 
 
 # ---------------------------------------------------------------------------
