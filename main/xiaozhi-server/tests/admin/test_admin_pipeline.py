@@ -65,6 +65,31 @@ def test_flow_follows_config(cli_path):
     assert [m["type"] for m in flow["messages"]][0] == "stt"
 
 
+def test_timeline_follows_config(cli_path):
+    flow = pipeline.describe_flow(merged(cli_path))
+    steps = {t["title"]: t["items"] for t in flow["timeline"]}
+    assert list(steps) == ["唤醒", "叫模型（可选）", "第一句话", "对话中", "结束"]
+    assert any("Hi, StackChan" in x and "设备自己识别" in x for x in steps["唤醒"])
+    assert any("“我在”" in x for x in steps["叫模型（可选）"])
+    assert any("cloud" in x for x in steps["叫模型（可选）"])  # 列出现在的称呼
+    assert any("2 小时" in x for x in steps["第一句话"])  # resume_window_minutes 默认 120
+    assert not any("API 模型" in x for x in steps["第一句话"])  # 没有叫到 API 模型
+    assert any("5 分钟" in x for x in steps["结束"])  # idle_timeout_seconds 默认 300
+    intent = next(s for s in flow["stages"] if s["id"] == "intent")
+    assert intent["params"][0]["label"] == "呼名" and "只说称呼" in [b["title"] for b in flow["branches"]]
+
+
+def test_timeline_with_call_names_disabled_and_api(tmp_path):
+    path = tmp_path / ".config.yaml"
+    path.write_text(API_YAML + "\ncall_names:\n  enabled: false\n", encoding="utf-8")
+    flow = pipeline.describe_flow(merged(path))
+    steps = {t["title"]: t["items"] for t in flow["timeline"]}
+    assert "叫模型（可选）" not in steps and any("DeepSeek" in x for x in steps["唤醒"])
+    assert any("API 模型" in x for x in steps["第一句话"])
+    assert not any("Claude Code 进程空闲" in x for x in steps["结束"])
+    assert "只说称呼" not in [b["title"] for b in flow["branches"]]
+
+
 def test_prompt_segments_for_claude_cli(cli_path):
     p = pipeline.describe_prompt(merged(cli_path))
     assert [s["id"] for s in p["segments"]] == ["claude_preset", "base", "voice_rules", "turn"]
