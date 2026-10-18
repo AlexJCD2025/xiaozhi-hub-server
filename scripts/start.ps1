@@ -1,4 +1,4 @@
-# xiaozhi-hub-server 启动（Windows PowerShell）：先快速自检，再启动服务。
+﻿# xiaozhi-hub-server 启动（Windows PowerShell）：先快速自检，再启动服务。
 # ⚠️ 未实测：尚未在 Windows 上运行验证。
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\start.ps1   跳过自检：$env:SKIP_DOCTOR = "1"
 $ErrorActionPreference = "Stop"

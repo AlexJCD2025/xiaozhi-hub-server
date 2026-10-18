@@ -52,6 +52,34 @@ def test_update_writes_key_and_keeps_comments(cfg_path):
     assert config_store.mask_key(merged(cfg_path)["LLM"]["ClaudeAPI"]["api_key"]) == "sk-a…cdef"
 
 
+def test_concurrent_saves_do_not_lose_updates(cfg_path, monkeypatch):
+    """两个保存请求同时读改写配置文件时，后写的不能覆盖先写的修改。"""
+    import threading
+
+    real_load = config_store.load_custom
+    barrier = threading.Barrier(2, timeout=0.5)
+
+    def slow_load(path=None):
+        data = real_load(path)
+        try:
+            barrier.wait()  # 没有锁时两个线程都会在这里读到同一份旧文件
+        except threading.BrokenBarrierError:
+            pass
+        return data
+
+    monkeypatch.setattr(config_store, "load_custom", slow_load)
+    m = merged(cfg_path)
+    jobs = [threading.Thread(target=config_store.update_entry, args=("LLM", "ClaudeAPI", {"api_key": "sk-new-1234567890"}, m, cfg_path)),
+            threading.Thread(target=config_store.select_entry, args=("LLM", "ChatGLMLLM", m, cfg_path))]
+    for t in jobs:
+        t.start()
+    for t in jobs:
+        t.join()
+    after = merged(cfg_path)
+    assert after["LLM"]["ClaudeAPI"]["api_key"] == "sk-new-1234567890"
+    assert after["selected_module"]["LLM"] == "ChatGLMLLM"
+
+
 def test_update_empty_secret_means_unchanged(cfg_path):
     config_store.update_entry("LLM", "ClaudeAPI", {"api_key": "sk-old-1234567890"}, merged(cfg_path), cfg_path)
     config_store.update_entry("LLM", "ClaudeAPI", {"api_key": "", "model_name": "claude-sonnet-5-5"}, merged(cfg_path), cfg_path)

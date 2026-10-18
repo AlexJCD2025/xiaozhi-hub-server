@@ -162,6 +162,28 @@ async def test_tool_guard_blocks_paths_outside_workdir(tmp_path):
     assert o.strict_mcp_config is True  # 不加载账号里的 claude.ai 连接器
 
 
+def test_glob_pattern_cannot_escape_workdir(tmp_path):
+    """Glob 的 pattern 本身能指定位置，也要限制在工作目录里；Grep 的 pattern 是正则，不当路径检查。"""
+    from core.agent.claude_session import outside_workdir
+
+    root = str(tmp_path)
+    escapes = ["/etc/*", "~/.ssh/*", "../*", "src/../../*", "{/etc,.}/*", "{., ~/.ssh}/*"]
+    for pattern in escapes:
+        assert outside_workdir({"pattern": pattern}, root, "Glob") == pattern, pattern
+    for pattern in ["**/*.py", "*.md", "notes/**/a?.txt", f"{root}/**/*.py"]:
+        assert outside_workdir({"pattern": pattern}, root, "Glob") is None, pattern
+    assert outside_workdir({"pattern": "/api/v1"}, root, "Grep") is None  # 正则表达式，不是路径
+    assert outside_workdir({"pattern": "*.py", "path": "/etc"}, root, "Glob") == "/etc"
+
+
+async def test_glob_guard_in_hook(tmp_path):
+    o = ClaudeSession(ClaudeSessionConfig(allowed_tools=["Glob"], workdir=str(tmp_path)))._options()
+    hook = o.hooks["PreToolUse"][0].hooks[0]
+    denied = await hook({"tool_name": "Glob", "tool_input": {"pattern": "/Users/*/.ssh/*"}}, "t1", None)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert await hook({"tool_name": "Glob", "tool_input": {"pattern": "**/*.txt"}}, "t2", None) == {}
+
+
 async def test_auto_mode_denies_unapproved_risky_tools(tmp_path):
     """Auto 模式下走到人工审批的操作：只读工具放行，其余拒绝（没人能点同意）。"""
     o = ClaudeSession(ClaudeSessionConfig(allowed_tools=["Read", "Bash", "WebSearch"], workdir=str(tmp_path),

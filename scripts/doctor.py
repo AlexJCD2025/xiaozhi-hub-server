@@ -67,7 +67,7 @@ def main() -> int:
         except Exception as e:
             broken.append(f"{name}（{type(e).__name__}: {e}）")
     add("插件", "error" if broken else "ok",
-        "导入失败：" + "、".join(broken) + "。请把缺少的包加入 requirements-hub-core.txt" if broken
+        "导入失败：" + "、".join(broken) + "。请重新运行安装脚本补装依赖；仍然失败时，说明 requirements-hub-core.txt 需要补上缺少的包" if broken
         else f"{len(names)} 个均可导入")
 
     # 2. 配置文件

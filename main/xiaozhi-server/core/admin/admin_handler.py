@@ -269,7 +269,7 @@ class AdminHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).warning(f"旧实例退役出错: {e}")
 
-    # ---------- 通用条目编辑（脚本和测试使用） ----------
+    # ---------- 状态 ----------
 
     async def handle_status(self, request: web.Request):
         self._require_login(request)

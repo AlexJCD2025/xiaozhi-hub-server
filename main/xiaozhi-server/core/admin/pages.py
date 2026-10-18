@@ -212,11 +212,10 @@ def save_vendor(vendor_id: str, payload: dict, merged: dict, path: Path = None) 
         changes.setdefault("api_key", "")
     if not changes:
         return []
-    data = config_store.load_custom(path)
-    target = data.setdefault("LLM", CommentedMap()).setdefault(vendor["entry"], CommentedMap())
-    for field, value in changes.items():
-        target[field] = value
-    config_store.save_custom(data, path)
+    with config_store.edit_custom(path) as data:
+        target = data.setdefault("LLM", CommentedMap()).setdefault(vendor["entry"], CommentedMap())
+        for field, value in changes.items():
+            target[field] = value
     return [f for f in changes if f != "type"]
 
 
@@ -363,17 +362,15 @@ def save_intent_plugins(functions: list, merged: dict, path: Path = None) -> lis
     wanted += [f for f in current if f not in catalog.PLUGIN_NAMES]
     if wanted == current:
         return []
-    data = config_store.load_custom(path)
-    target = data.setdefault("Intent", CommentedMap()).setdefault(name, CommentedMap())
-    target["functions"] = CommentedSeq(wanted)
-    config_store.save_custom(data, path)
+    with config_store.edit_custom(path) as data:
+        target = data.setdefault("Intent", CommentedMap()).setdefault(name, CommentedMap())
+        target["functions"] = CommentedSeq(wanted)
     return ["functions"]
 
 
 def remember_api_intent(mode: str, path: Path = None) -> None:
     """记住 API 模式下用户选的意图识别，切回 API 模型时恢复。"""
-    data = config_store.load_custom(path)
-    admin = data.setdefault("admin", CommentedMap())
-    if admin.get("api_intent") != mode:
-        admin["api_intent"] = mode
-        config_store.save_custom(data, path)
+    if (config_store.load_custom(path).get("admin") or {}).get("api_intent") == mode:
+        return
+    with config_store.edit_custom(path) as data:
+        data.setdefault("admin", CommentedMap())["api_intent"] = mode

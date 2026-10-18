@@ -7,6 +7,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
 from collections import deque
@@ -52,18 +53,38 @@ READ_ONLY_TOOLS = {"Read", "Grep", "Glob", "WebSearch", "WebFetch", "TodoWrite"}
 PATH_KEYS = ("file_path", "path", "notebook_path")
 
 
-def outside_workdir(tool_input: dict, workdir: Optional[str]) -> Optional[str]:
+GLOB_META = re.compile(r"[*?\[{]")
+
+
+def _escapes_root(root: str, value: str) -> bool:
+    target = os.path.realpath(os.path.join(root, os.path.expanduser(value)))
+    return os.path.commonpath([root, target]) != root
+
+
+def _glob_escapes(root: str, pattern: str) -> bool:
+    """Glob 的 pattern 本身也能指定位置：绝对路径、~、..，或藏在大括号里的绝对路径（如 {/etc,.}/*）。"""
+    if re.search(r"(^|[/\\])\.\.([/\\]|$)", pattern) or re.search(r"[{,]\s*[/\\~]", pattern):
+        return True
+    if not (os.path.isabs(pattern) or pattern.startswith("~")):
+        return False
+    m = GLOB_META.search(pattern)
+    fixed = pattern[:m.start()] if m else pattern
+    return _escapes_root(root, os.path.dirname(fixed) if m else fixed)
+
+
+def outside_workdir(tool_input: dict, workdir: Optional[str], tool_name: Optional[str] = None) -> Optional[str]:
     """工具要访问的路径在工作目录之外时，返回这个路径；否则返回 None。"""
     if not workdir or not isinstance(tool_input, dict):
         return None
     root = os.path.realpath(os.path.expanduser(workdir))
     for key in PATH_KEYS:
         value = tool_input.get(key)
-        if not isinstance(value, str) or not value.strip():
-            continue
-        target = os.path.realpath(os.path.join(root, os.path.expanduser(value)))
-        if os.path.commonpath([root, target]) != root:
+        if isinstance(value, str) and value.strip() and _escapes_root(root, value):
             return value
+    # Grep 的 pattern 是正则表达式，不是路径，只检查 Glob
+    pattern = tool_input.get("pattern")
+    if tool_name == "Glob" and isinstance(pattern, str) and _glob_escapes(root, pattern.strip()):
+        return pattern
     return None
 
 ASSISTANT_ERROR_KINDS = {
@@ -114,7 +135,7 @@ class ClaudeSession(AgentSession):
         def deny_reason(name, tool_input):
             if name not in allowed:
                 return "语音模式下不允许使用这个工具"
-            path = outside_workdir(tool_input, workdir)
+            path = outside_workdir(tool_input, workdir, name)
             if path:
                 return f"语音模式下只能访问工作目录里的文件，不能访问 {path}"
             return None
