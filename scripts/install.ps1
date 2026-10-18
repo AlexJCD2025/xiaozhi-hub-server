@@ -168,6 +168,6 @@ Write-Host @"
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。
-  - 请在 Windows 防火墙中放行 TCP 端口 $WsPort 和 $HttpPort（仅限专用网络）。
+  - 请在 Windows 防火墙中放行 TCP 端口 ${WsPort} 和 ${HttpPort}（仅限专用网络）。
   - 服务只应在局域网内使用，不要暴露到公网。
 "@

@@ -47,12 +47,12 @@ FULL=0
 for arg in "$@"; do
   case "$arg" in
     --full) FULL=1 ;;
-    *) fail "未知参数：$arg（可用参数：--full）" ;;
+    *) fail "未知参数：${arg}（可用参数：--full）" ;;
   esac
 done
 
 OS="$(uname -s)"
-[[ "$OS" == "Darwin" || "$OS" == "Linux" ]] || fail "不支持的系统：$OS（Windows 请使用 scripts/install.ps1）"
+[[ "$OS" == "Darwin" || "$OS" == "Linux" ]] || fail "不支持的系统：${OS}（Windows 请使用 scripts/install.ps1）"
 
 # ---------- 1. uv ----------
 step "检查 uv（用于管理 Python 版本和虚拟环境）"
@@ -181,7 +181,7 @@ fi
 # ---------- 7. Claude Code ----------
 step "检查 Claude Code"
 if [[ -n "$CLAUDE_BIN" ]]; then
-  info "$("$CLAUDE_BIN" --version 2>/dev/null || echo '无法获取版本')（$CLAUDE_BIN）"
+  info "$("$CLAUDE_BIN" --version 2>/dev/null || echo '无法获取版本')（${CLAUDE_BIN}）"
   info "如果还没登录，请在终端运行 claude 并按提示登录（安装脚本不会代替你登录）"
 else
   info "未找到 Claude Code。如需使用，请先安装：https://docs.claude.com/claude-code ，安装并登录后在管理后台切换到 ClaudeCLI"
