@@ -33,11 +33,13 @@ def req_name(line: str):
 
 def find_culprit(stderr: str, names: set):
     """从 uv 的报错里找出导致无法安装的那个库（必须是 requirements.txt 里直接列出的）。"""
+    # 网络问题（下载失败、超时）不是"平台装不上"，不能跳过，否则可能把 torch 这类核心库跳掉
+    if re.search(r"Failed to (?:download|fetch)|timed? ?out|Connection (?:reset|refused)|network", stderr, re.I):
+        return None
     patterns = [
         r"Because (?:only )?([A-Za-z0-9_.\-]+)[=<>!~ ]",          # Because vosk==0.3.45 has no wheels ...
         r"you require ([A-Za-z0-9_.\-]+)[=<>!~ ]",
-        r"Failed to (?:build|download|install) `?([A-Za-z0-9_.\-]+)",
-        r"No solution found when resolving.*?\n.*?([A-Za-z0-9_.\-]+)==",
+        r"Failed to build `?([A-Za-z0-9_.\-]+)",                 # 当前平台没有安装包，只能编译且编译失败
     ]
     for pattern in patterns:
         for m in re.finditer(pattern, stderr, re.S):
@@ -75,7 +77,8 @@ def main() -> int:
         culprit = find_culprit(result.stderr, names - set(skipped))
         if not culprit or attempt == MAX_RETRIES:
             print(result.stderr[-3000:], file=sys.stderr)
-            print("依赖安装失败，且无法自动判断是哪个库导致的，请查看上面的报错。", file=sys.stderr)
+            print("依赖安装失败，且无法自动判断是哪个库导致的，请查看上面的报错。"
+                  "如果是网络问题，可以设置 UV_INDEX_URL 使用国内镜像后重新运行。", file=sys.stderr)
             return 1
         reason = next((l.strip() for l in result.stderr.splitlines() if culprit.split("-")[0] in l.lower()), "")
         print(f"    当前平台装不上 {culprit}，跳过后重试。原因：{reason[:160]}", flush=True)

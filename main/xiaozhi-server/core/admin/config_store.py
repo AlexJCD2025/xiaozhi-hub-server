@@ -22,7 +22,9 @@ from config.config_loader import get_project_dir, merge_configs, read_config
 
 SECTIONS = ("LLM", "ASR", "TTS", "Intent")
 SECRET_FIELD = re.compile(
-    r"(^token$|api_?key|access_?token|access_?key|secret|password|passwd|private_?key|app_?key)", re.I
+    r"(^token$|_token$|api_?key|access_?token|access_?key|secret|password|passwd|private_?key|app_?key"
+    r"|authorization|bearer|cookie|credential)",
+    re.I,
 )
 # 条目里原本没有、但允许在后台新增的字段：{条目 type: {字段: 类型}}
 ADDABLE_FIELDS = {"openai": {"extra_body": "json"}}

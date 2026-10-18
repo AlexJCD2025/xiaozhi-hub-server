@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import functools
 import ipaddress
 import json
 from pathlib import Path
@@ -74,6 +75,11 @@ class AdminHandler:
         except ValueError:
             return False
 
+    @staticmethod
+    async def _blocking(func, *args, **kwargs):
+        """在线程池里执行同步操作（配置文件读写、密码哈希），不阻塞负责音频下发的主事件循环。"""
+        return await asyncio.get_running_loop().run_in_executor(None, functools.partial(func, *args, **kwargs))
+
     def _logged_in(self, request: web.Request) -> bool:
         return self.sessions.valid(request.cookies.get(COOKIE_NAME))
 
@@ -131,16 +137,17 @@ class AdminHandler:
         password = str(body.get("password") or "")
         if len(password) < auth.MIN_PASSWORD_LENGTH:
             return self._error(f"密码至少 {auth.MIN_PASSWORD_LENGTH} 位", 400)
-        config_store.set_password_hash(auth.hash_password(password), self.config_path)
+        password_hash = await self._blocking(auth.hash_password, password)
+        await self._blocking(config_store.set_password_hash, password_hash, self.config_path)
         self.logger.bind(tag=TAG).info("管理后台密码已设置")
         return self._login_response(request, {"ok": True})
 
     async def handle_login(self, request: web.Request):
         body = await self._read_json(request)
-        stored = config_store.get_password_hash(self.config_path)
+        stored = await self._blocking(config_store.get_password_hash, self.config_path)
         if not stored:
             return self._error("尚未设置密码", 409)
-        if not auth.verify_password(str(body.get("password") or ""), stored):
+        if not await self._blocking(auth.verify_password, str(body.get("password") or ""), stored):
             await asyncio.sleep(1)  # 减缓暴力尝试
             self.logger.bind(tag=TAG).warning(f"管理后台登录失败，来源 {request.remote}")
             return self._error("密码错误", 401)
@@ -167,15 +174,14 @@ class AdminHandler:
 
     async def handle_status(self, request: web.Request):
         self._require_login(request)
-        loop = asyncio.get_running_loop()
-        merged = self._merged()
-        status = await loop.run_in_executor(None, collect_status, self.config, merged)
+        merged = await self._blocking(self._merged)
+        status = await self._blocking(collect_status, self.config, merged)
         return self._json({"ok": True, **status})
 
     async def handle_module_list(self, request: web.Request):
         self._require_login(request)
         section = self._section(request)
-        data = config_store.describe_section(self._merged(), section)
+        data = config_store.describe_section(await self._blocking(self._merged), section)
         data["running"] = (self.config.get("selected_module") or {}).get(section)
         return self._json({"ok": True, **data})
 
@@ -185,7 +191,8 @@ class AdminHandler:
         name = request.match_info["name"]
         body = await self._read_json(request)
         try:
-            changed = config_store.update_entry(section, name, body, self._merged(), self.config_path)
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(config_store.update_entry, section, name, body, merged, self.config_path)
         except KeyError:
             return self._error(f"没有名为 {name} 的配置", 404)
         except ValueError as e:
@@ -200,7 +207,8 @@ class AdminHandler:
         body = await self._read_json(request)
         name = str(body.get("name") or "")
         try:
-            config_store.select_entry(section, name, self._merged(), self.config_path)
+            merged = await self._blocking(self._merged)
+            await self._blocking(config_store.select_entry, section, name, merged, self.config_path)
         except KeyError:
             return self._error(f"没有名为 {name} 的配置", 404)
         self.logger.bind(tag=TAG).info(f"管理后台切换 {section} 为: {name}")
@@ -220,18 +228,27 @@ class AdminHandler:
         if conn is None or getattr(conn, "websocket", None) is None:
             return self._error("设备不在线", 404)
         body = await self._read_json(request)
-        interval = min(max(float(body.get("interval") or 2), 0.5), 10)
+        try:
+            interval = min(max(float(body.get("interval") or 2), 0.5), 10)
+        except (TypeError, ValueError):
+            return self._error("interval 需要是数字（秒）", 400)
+        self._emotion_tests = {sid: t for sid, t in self._emotion_tests.items() if not t.done()}
         running = self._emotion_tests.get(session_id)
-        if running and not running.done():
+        if running:
             running.cancel()
         sequence = [{"emoji": e, "emotion": name} for e, name in EMOJI_MAP.items()]
 
         async def run():
-            for item in sequence:
-                await conn.websocket.send(json.dumps(
-                    {"type": "llm", "text": item["emoji"], "emotion": item["emotion"], "session_id": conn.session_id}
-                ))
-                await asyncio.sleep(interval)
+            try:
+                for item in sequence:
+                    await conn.websocket.send(json.dumps(
+                        {"type": "llm", "text": item["emoji"], "emotion": item["emotion"], "session_id": conn.session_id}
+                    ))
+                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # 测试中途设备断开等
+                self.logger.bind(tag=TAG).info(f"表情测试已中止：{e}")
 
         self._emotion_tests[session_id] = asyncio.get_running_loop().create_task(run())
         self.logger.bind(tag=TAG).info(f"开始表情测试：设备 {conn.device_id}，共 {len(sequence)} 种，间隔 {interval} 秒")
@@ -246,24 +263,31 @@ class AdminHandler:
         - TTS：每个连接各自创建，不用重建。
         已建立的设备连接继续使用旧实例，设备重新连接后才会用上新配置。
         """
-        merged = self._merged()
-        self.config[section] = merged.get(section, {})
-        self.config.setdefault("selected_module", {})[section] = merged["selected_module"][section]
-        if section == "TTS":
-            return {"applied": True, "note": "设备重新连接后生效"}
-        if self.ws_server is None:
+        merged = await self._blocking(self._merged)
+        new_section = merged.get(section, {})
+        new_selected = merged["selected_module"][section]
+
+        def commit():
+            self.config[section] = new_section
+            self.config.setdefault("selected_module", {})[section] = new_selected
+
+        if section == "TTS" or self.ws_server is None:
+            commit()
+            if section == "TTS":
+                return {"applied": True, "note": "设备重新连接后生效"}
             return {"applied": False, "note": "已保存，重启服务后生效"}
         flags = {"LLM": "init_llm", "Intent": "init_intent", "ASR": "init_asr"}
         attr = {"LLM": "_llm", "Intent": "_intent", "ASR": "_asr"}[section]
         key = {"LLM": "llm", "Intent": "intent", "ASR": "asr"}[section]
+        # 先用"新配置"创建实例；成功后才写入运行中的配置并替换实例，失败时服务保持原来的状态
+        candidate = {**self.config, section: new_section,
+                     "selected_module": {**self.config.get("selected_module", {}), section: new_selected}}
         try:
-            loop = asyncio.get_running_loop()
             async with self.ws_server.config_lock:
-                modules = await loop.run_in_executor(
-                    None, lambda: initialize_modules(self.logger, self.config, **{flags[section]: True})
-                )
+                modules = await self._blocking(initialize_modules, self.logger, candidate, **{flags[section]: True})
+                commit()
                 setattr(self.ws_server, attr, modules[key])
             return {"applied": True, "note": "已生效，设备重新连接后使用新配置"}
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"热加载 {section} 失败: {e}")
-            return {"applied": False, "note": f"已保存，但加载失败：{e}。请检查配置后重试，或重启服务"}
+            return {"applied": False, "note": f"已保存，但加载失败：{e}。服务仍在使用原来的配置，请检查后重试"}

@@ -82,8 +82,9 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
             # 自定义节奏：等待最后帧在客户端播放完成
             playback_time = 2 * rate_controller.interval_ms / 1000.0
         else:
-            # 默认节奏：前 N 帧预缓冲已直接发出，需要等待它们播放完成
-            playback_time = (_pre_buffer_count(conn) + 2) * rate_controller.interval_ms / 1000.0
+            # [xiaozhi-hub] 默认节奏：按估算的设备剩余缓冲等待它们播放完成（预缓冲可能在每句开头重新发生）
+            remaining = getattr(conn, "audio_flow_control", {}).get("play_end", 0) - time.monotonic()
+            playback_time = max(remaining, 0) + 2 * rate_controller.interval_ms / 1000.0
         await asyncio.sleep(playback_time)
 
         conn.logger.bind(tag=TAG).debug("音频发送完成")
@@ -262,21 +263,19 @@ async def _send_audio_with_rate_control(
             rate_controller.add_audio(packet)
         else:
             # 默认节奏模式（60ms/包）：前 N 包预缓冲直接发，后续入队由后台任务按 interval_ms 节奏发
-            if flow_control["packet_count"] < _pre_buffer_count(conn):
-                await _do_send_audio(conn, packet, flow_control)
-                continue
-            # [xiaozhi-hub] 队列播空后（上一句发完、下一句还在合成）重新预缓冲一次，
+            # [xiaozhi-hub] 设备缓冲快播空时（每轮开头，或上一句发完、下一句才合成好）先直接发 N 包预缓冲，
             # 否则第一句之后设备缓冲一直接近 0，Wi-Fi 稍有抖动就会断断续续。
-            if not rate_controller.queue and not flow_control.get("in_burst"):
-                idle_ms = (time.monotonic() - rate_controller._last_queue_empty_time) * 1000
-                if idle_ms > rate_controller.interval_ms:
+            # play_end 是估算的设备播完时间，由 _do_send_audio 在每次发送后更新。
+            if not rate_controller.queue:
+                ahead = flow_control.get("play_end", 0) - time.monotonic()
+                burst_left = flow_control.get("burst_left", 0)
+                # 没有进行中的预缓冲且设备快播完；或者设备已经播空（上一句的预缓冲没用完也重新来一次）
+                if (burst_left == 0 and ahead < AUDIO_FRAME_DURATION / 1000.0) or ahead < 0:
                     flow_control["burst_left"] = _pre_buffer_count(conn)
-                    flow_control["in_burst"] = True
             if flow_control.get("burst_left", 0) > 0:
                 flow_control["burst_left"] -= 1
                 await _do_send_audio(conn, packet, flow_control)
             else:
-                flow_control["in_burst"] = False
                 rate_controller.add_audio(packet)
 
 
@@ -299,6 +298,10 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     # 更新流控状态
     flow_control["packet_count"] = packet_index + 1
     flow_control["sequence"] = sequence + 1
+    # [xiaozhi-hub] 估算设备播完已收到音频的时间（每包 AUDIO_FRAME_DURATION 毫秒）
+    flow_control["play_end"] = (
+        max(flow_control.get("play_end", 0), time.monotonic()) + AUDIO_FRAME_DURATION / 1000.0
+    )
 
 
 async def send_tts_message(conn: "ConnectionHandler", state, text=None):

@@ -16,8 +16,9 @@ THINKING_DISABLED_DOMAINS = {
     "bigmodel.cn": {"thinking": {"type": "disabled"}},
     "moonshot.cn": {"thinking": {"type": "disabled"}},
     "volces.com": {"thinking": {"type": "disabled"}},
-    # [xiaozhi-hub] Claude 的 OpenAI 兼容接口默认会隐藏思考，首字延迟 3~6 秒且可能耗尽 max_tokens
-    "anthropic.com": {"reasoning_effort": "none"},
+    # [xiaozhi-hub] Claude 5 默认开启思考：首字延迟 3~6 秒且可能耗尽 max_tokens。
+    # 官方兼容接口会忽略 reasoning_effort，要用 thinking 参数关闭（经第三方代理时可在配置里写 extra_body）
+    "anthropic.com": {"thinking": {"type": "disabled"}},
 }
 
 

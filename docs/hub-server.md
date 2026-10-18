@@ -71,7 +71,7 @@ StackChan 的几点说明：
 - **电脑 IP 变了，设备连不上**：在路由器里给电脑设置固定 IP。
 - **Windows 防火墙**：需要放行 TCP 16688 和 16689 端口（仅限专用网络）。
 - **设备说话断续**：调大 `data/.config.yaml` 里的 `tts_audio_prebuffer_count`（默认 15 帧，约 0.9 秒），合理范围是 10~25。
-- **Claude CLI 没有反应**：先在管理后台的状态页确认 Claude Code 能找到并已登录，然后查看 `main/xiaozhi-server/tmp/server.log`，里面记录了工具调用、限流状态和每轮的结果。
+- **Claude CLI 没有反应**：先在管理后台的状态页确认能找到 Claude Code（状态页只检查是否安装，不检查是否登录；未登录时请在终端运行一次 `claude` 登录），然后查看 `main/xiaozhi-server/tmp/server.log`，里面记录了工具调用、限流状态和每轮的结果。
 
 ## 安全提示
 

@@ -424,3 +424,127 @@ def test_idle_timeout_closes_process(provider):
     while not agent.closed and time.time() < deadline:
         time.sleep(0.05)
     assert agent.closed
+
+
+# ---------- 全量审查后补充的回归测试 ----------
+
+def test_zero_values_are_respected(tmp_path):
+    p = provider_mod.LLMProvider({"cli_path": str(tmp_path / "x"), "workdir": str(tmp_path / "w"),
+                                  "resume_window_minutes": 0, "filler_delay_seconds": 0,
+                                  "stall_timeout_seconds": 0, "turn_timeout_seconds": 0})
+    try:
+        assert p.resume_window == 0 and p.filler_delay == 0
+        assert p.stall_timeout == float("inf") and p.turn_timeout == float("inf")  # 0 表示不限制
+    finally:
+        p._loop.call_soon_threadsafe(p._loop.stop)
+
+
+def test_resume_window_zero_disables_auto_resume(provider):
+    provider.resume_window = 0
+    provider.store.touch("dev-1", "old-sid")
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert FakeAgent.instances[0].resume_id is None
+
+
+def test_resume_failure_keeps_record_when_fresh_start_also_fails(provider):
+    class AlwaysFail(FakeAgent):
+        async def start(self):
+            raise AgentSessionError(ErrorKind.SESSION_MISSING if self.resume_id else ErrorKind.PROCESS_EXITED, "x")
+    provider_mod.ClaudeSession = AlwaysFail
+    provider.store.touch("dev-1", "old-sid")
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "你好")
+    assert "意外退出" in out
+    assert provider.store.get("dev-1")["session_id"] == "old-sid"  # 临时故障不删除可接续的会话
+
+
+def test_connection_closed_during_start_does_not_leak_process(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    st = provider._states[c.session_id]
+
+    class SlowStart(FakeAgent):
+        async def start(self):
+            provider.on_conn_close(c)  # 启动过程中连接被关闭
+            await super().start()
+    provider_mod.ClaudeSession = SlowStart
+    run(provider, c, "你好")
+    deadline = time.time() + 2
+    while not FakeAgent.instances[0].closed and time.time() < deadline:
+        time.sleep(0.05)
+    assert FakeAgent.instances[0].closed and st.agent is None
+
+
+def test_idle_timer_does_not_close_after_new_turn(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "第一句")
+    st = provider._states[c.session_id]
+    stale_gen = st.turn_gen
+    run(provider, c, "第二句")  # 新的一轮让旧定时器失效
+    fut = asyncio.run_coroutine_threadsafe(provider._idle_close(st, stale_gen), provider._loop)
+    fut.result(timeout=2)
+    assert not FakeAgent.instances[0].closed
+
+
+def test_stuck_turn_is_abandoned(provider):
+    FakeAgent.delay = 5          # 中断无效：这一轮一直不结束
+    provider.filler = ""
+    provider.stall_timeout = 0.5
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "你好")
+    assert "没有回应" in out
+    deadline = time.time() + 3
+    while not FakeAgent.instances[0].closed and time.time() < deadline:
+        time.sleep(0.05)
+    assert FakeAgent.instances[0].closed  # 卡死的进程被强制关闭，下一轮会重新启动
+
+
+class ErrorClient(FakeClient):
+    def __init__(self):
+        super().__init__([])
+        self.disconnected = False
+
+    async def receive_response(self):
+        from claude_agent_sdk import ClaudeSDKError
+        raise ClaudeSDKError("bad json")
+        yield  # pragma: no cover
+
+    async def disconnect(self):
+        self.disconnected = True
+
+
+async def test_sdk_error_closes_process():
+    s = ClaudeSession(ClaudeSessionConfig())
+    client = ErrorClient()
+    s._client = client
+    evs = await collect(s)
+    assert isinstance(evs[-1], Error) and evs[-1].kind == ErrorKind.PROCESS_EXITED
+    assert client.disconnected and s._client is None
+
+
+async def test_stream_event_with_null_delta():
+    ev = StreamEvent(uuid="u", session_id="s", event={"type": "content_block_delta", "delta": None})
+    s = session_with([ev, delta("好"), result()])
+    assert [e.text for e in await collect(s) if isinstance(e, TextDelta)] == ["好"]
+
+
+def test_claude_cli_version_parsing(tmp_path):
+    script = tmp_path / "fake-claude"
+    script.write_text("#!/bin/sh\nprintf '\\n  \\n2.1.302 (Claude Code)\\n'\n")
+    script.chmod(0o755)
+    assert provider_mod.claude_cli_version(str(script)) == "2.1.302 (Claude Code)"
+    empty = tmp_path / "empty-claude"
+    empty.write_text("#!/bin/sh\nprintf '\\n'\n")
+    empty.chmod(0o755)
+    assert provider_mod.claude_cli_version(str(empty)) == ""
+
+
+def test_wants_resume_ignores_negation():
+    assert not wants_resume("别接着上次聊了，换个话题")
+    assert not wants_resume("不要继续刚才的话题")
+    assert wants_resume("别管了，接着上次聊吧")  # 否定词不紧挨关键字

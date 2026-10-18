@@ -2,7 +2,6 @@
 
 import ctypes.util
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,10 +17,10 @@ def _claude_version(cli_path: str) -> str:
     cached = _cli_cache.get(cli_path)
     if cached and time.time() - cached[0] < 60:
         return cached[1]
+    from core.providers.llm.claude_cli.claude_cli import claude_cli_version
+
     try:
-        out = subprocess.run([cli_path, "--version"], capture_output=True, text=True,
-                             encoding="utf-8", timeout=15)
-        version = (out.stdout or out.stderr).strip().splitlines()[0] if (out.stdout or out.stderr) else ""
+        version = claude_cli_version(cli_path) or "没有输出版本号"
     except Exception as e:
         version = f"运行失败: {e}"
     _cli_cache[cli_path] = (time.time(), version)
