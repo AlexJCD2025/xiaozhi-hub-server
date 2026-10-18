@@ -264,13 +264,25 @@ class AdminHandler:
             async with self.ws_server.config_lock:
                 modules = await self._blocking(initialize_modules, self.logger, candidate, **{flags[section]: True})
                 commit()
+                old = getattr(self.ws_server, attr, None)
                 setattr(self.ws_server, attr, modules[key])
+            self._retire(old, modules[key])
             return {"applied": True, "note": "已生效，设备重新连接后使用新配置"}
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"热加载 {section} 失败: {e}")
             error = str(e).strip().rstrip("。.") or type(e).__name__
             return {"applied": False, "failed": True, "error": error,
                     "note": f"已保存，但加载失败：{error}。服务仍在使用原来的配置，请检查后重试"}
+
+    def _retire(self, old, new) -> None:
+        """通知被替换的旧实例退役（如 claude_cli 在连接都关闭后结束后台线程）。
+        已连接的设备仍在用旧实例，所以不能直接关掉；出错也不影响这次切换。"""
+        if old is None or old is new or not callable(getattr(old, "shutdown", None)):
+            return
+        try:
+            old.shutdown()
+        except Exception as e:
+            self.logger.bind(tag=TAG).warning(f"旧实例退役出错: {e}")
 
     # ---------- 通用条目编辑（脚本和测试使用） ----------
 

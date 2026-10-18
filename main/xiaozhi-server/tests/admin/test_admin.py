@@ -310,6 +310,31 @@ async def test_apply_failure_keeps_running_config(cfg_path, monkeypatch):
     assert running["selected_module"]["LLM"] == "ClaudeAPI" and ws._llm == "old-llm"  # 失败时服务保持原状
 
 
+async def test_apply_retires_replaced_instance(cfg_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from core.admin import admin_handler as ah
+
+    class OldLLM:
+        retired = False
+
+        def shutdown(self):
+            self.retired = True
+
+    new_llm = object()
+    monkeypatch.setattr(ah, "initialize_modules", lambda *a, **k: {"llm": new_llm})
+    old = OldLLM()
+    ws = SimpleNamespace(config_lock=asyncio.Lock(), _llm=old)
+    running = {"selected_module": {"LLM": "ClaudeAPI"}, "LLM": {"ClaudeAPI": {"type": "openai"}}}
+    h = ah.AdminHandler(running, ws_server=ws, config_path=cfg_path)
+    config_store.select_entry("LLM", "ChatGLMLLM", config_store.load_merged(custom_path=cfg_path), cfg_path)
+    assert (await h._apply("LLM"))["applied"] is True
+    assert ws._llm is new_llm and old.retired  # 替换后通知旧实例退役
+
+    ws._llm = "plain-llm"  # 没有 shutdown 方法的实例直接替换，不报错
+    assert (await h._apply("LLM"))["applied"] is True and ws._llm is new_llm
+
+
 # ---------- 模块依赖检测（精简安装） ----------
 
 def test_missing_packages_reads_module_level_imports(tmp_path, monkeypatch):

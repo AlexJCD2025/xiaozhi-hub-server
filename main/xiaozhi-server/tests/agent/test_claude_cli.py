@@ -218,7 +218,8 @@ def provider(tmp_path, monkeypatch):
                                   "filler_delay_seconds": 0.3, "turn_timeout_seconds": 2})
     p.store = SessionStore(tmp_path / "sessions.json", "claude_cli")
     yield p
-    p._loop.call_soon_threadsafe(p._loop.stop)
+    if not p._loop.is_closed():  # 退役测试里循环已经自己停了
+        p._loop.call_soon_threadsafe(p._loop.stop)
 
 
 def conn(sid="conn-1", device="dev-1", intent="nointent"):
@@ -247,6 +248,57 @@ def test_provider_reuses_one_process_across_turns(provider):
     assert agent.sent == ["第一句", "第二句"]
     assert "你是小智" in agent.config.system_prompt_append and "语音助手规则" in agent.config.system_prompt_append
     assert provider.store.get("dev-1")["session_id"] == agent.session_id
+
+
+# ---------- 热加载后旧实例退役 ----------
+
+def wait_thread_exit(p, timeout=3.0):
+    p._thread.join(timeout)
+    return not p._thread.is_alive()
+
+
+def test_shutdown_without_connections_stops_thread(provider):
+    assert provider._thread.is_alive()
+    provider.shutdown()
+    assert wait_thread_exit(provider)
+    assert provider._loop.is_closed()
+
+
+def test_shutdown_waits_for_open_connections(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    assert run(provider, c, "第一句") == "🙂好"
+    provider.shutdown()
+    assert not wait_thread_exit(provider, timeout=0.3)  # 还有连接：线程保留，不打断对话
+    assert run(provider, c, "第二句") == "🙂好"  # 已连接的设备继续用旧实例
+    assert FakeAgent.instances[0].sent == ["第一句", "第二句"]
+    provider.on_conn_close(c)
+    assert wait_thread_exit(provider)
+    assert FakeAgent.instances[0].closed  # 退出前先关掉 Claude Code 进程
+
+
+def test_shutdown_waits_for_turn_still_running(provider):
+    FakeAgent.delay = 0.6
+    c = conn()
+    provider.on_conn_open(c)
+    gen = provider.response(c.session_id, [{"role": "user", "content": "慢一点"}])
+    assert next(gen).startswith("😶")  # 0.3 秒后先出填充语，这一轮还在 Claude Code 里跑
+    provider.shutdown()
+    provider.on_conn_close(c)
+    assert provider._thread.is_alive()
+    assert "".join(gen) == "🙂好"
+    assert wait_thread_exit(provider)
+    assert FakeAgent.instances[0].closed
+
+
+def test_connection_arriving_after_stop_gets_new_loop(provider):
+    provider.shutdown()
+    assert wait_thread_exit(provider)
+    c = conn()
+    provider.on_conn_open(c)  # 替换瞬间连上旧实例的设备仍然能用
+    assert run(provider, c, "你好") == "🙂好"
+    provider.on_conn_close(c)
+    assert wait_thread_exit(provider)
 
 
 def test_provider_resumes_within_window_after_reconnect(provider):
