@@ -83,7 +83,8 @@
   .in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .seg { display: inline-flex; margin-top: 6px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 3px; }
   .seg button { padding: 5px 18px; border-radius: 6px; color: var(--muted); cursor: pointer; border: 0; background: none; }
-  .seg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); font-weight: 500; }
+  .seg button:hover:not(.on) { color: var(--text); }
+  .seg button.on { background: var(--btn); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); font-weight: 600; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
   .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; background: var(--card); }
   .chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
@@ -96,6 +97,7 @@
   .cli-row .seg { margin-top: 0; flex-wrap: wrap; }
   .cli-row .seg button { padding: 6px 14px; line-height: 1.3; }
   .cli-row .seg button small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .cli-row .seg button.on small { color: rgba(255, 255, 255, .85); }
   #model-custom { margin-top: 8px; }
   .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .level { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; text-align: left; background: var(--card); cursor: pointer; }
