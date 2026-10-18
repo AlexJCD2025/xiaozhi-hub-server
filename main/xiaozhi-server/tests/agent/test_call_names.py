@@ -10,7 +10,7 @@ from core.agent.call_names import handle_call_name, match_call_name
 
 
 @pytest.mark.parametrize("asr_text", ["Hi, cloud.", "Hi, cloud. Hi, cloud.", "High cloud.", "嗨 Claude", "hey，克劳德！",
-                                      "He cloud.", "Heい cloud。", "Hei cloud"])  # "嘿"被识别成 he（真机实测）
+                                      "He cloud.", "Heい cloud。", "Hei cloud", "H, cloud."])  # "嘿"被识别成 he、h（真机实测）
 def test_only_call_name(asr_text):
     assert match_call_name(asr_text) == ("ClaudeCLI", "")
 
@@ -39,6 +39,8 @@ def test_call_name_with_content(asr_text, rest):
     "今天嗨 cloud 一下",               # 不在句首
     "Hello cloud",                    # hello 不是招呼语 he
     "Help cloud 怎么用",
+    "Hey.",                           # 称呼没识别出来（真机实测）
+    "H5 cloud 页面",                   # h 后面紧跟别的字符，不是招呼语
     "",
 ])
 def test_not_call_name(asr_text):
@@ -144,7 +146,7 @@ async def test_handle_disabled_and_custom_reply(spoken):
 
 @pytest.mark.parametrize("asr_text, alias", [
     ("嗨cloud。", "cloud"), ("Hi, cloud. Hi, cloud.", "cloud"), ("High cloud.", "cloud"),
-    ("hicloud", "cloud"), ("嘿 克劳德！", "克劳德"), ("Heい cloud。", "cloud"), ("He cloud.", "cloud"), ("克劳德", "克劳德"), ("嗨。", ""),
+    ("hicloud", "cloud"), ("嘿 克劳德！", "克劳德"), ("Heい cloud。", "cloud"), ("He cloud.", "cloud"), ("H, cloud.", "cloud"), ("克劳德", "克劳德"), ("嗨。", ""),
 ])
 def test_extract_alias(asr_text, alias):
     assert call_names.extract_alias(asr_text) == alias

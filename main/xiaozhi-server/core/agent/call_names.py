@@ -29,9 +29,10 @@ def one_segment(text: str) -> str:
     """把回复整理成 TTS 只合成一段的形式：句中的标点会把一句话切成几段、逐段合成播放，听起来拖沓。"""
     return re.sub(r"\s+", " ", re.sub(r"[，,、~～；;：:。.！!？?]+", " ", text or "")).strip()
 
-# "嘿"常被识别成 he，有时后面还带一个日文假名（实测 "He cloud."、"Heい cloud。"）
-_PREFIXES = ["hiigh", "high", "hey", "hei", "hai", "hi", "he", "嗨", "嘿"]
-_PREFIX = "(?:" + "|".join(_PREFIXES) + r")[\u3040-\u30ff]*"
+# "嘿"常被识别成 he，有时后面还带一个日文假名，偶尔只剩一个 h（实测 "He cloud."、"Heい cloud。"、"H, cloud."）
+_PREFIXES = ["hiigh", "high", "hey", "hei", "hai", "hi", "he", "h", "嗨", "嘿"]
+# 单个 h 后面必须是停顿，否则 "hello"、"haiku" 这类词开头的 h 会被当成招呼语
+_PREFIX = "(?:" + "|".join(p if p != "h" else r"h(?=[\s,，.。!！?？、~～])" for p in _PREFIXES) + r")[\u3040-\u30ff]*"
 _SEP = r"[\s,，.。!！?？、~～]*"
 
 
