@@ -12,8 +12,12 @@ from core.agent import claude_session as cs_mod
 from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
 from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
-from core.agent.voice_commands import wants_resume
+from core.agent.voice_commands import match_resume
 from core.providers.llm.claude_cli import claude_cli as provider_mod
+
+
+def wants_resume(text, keywords=None):
+    return match_resume(text, keywords) is not None
 
 
 # ---------- 假 SDK 消息 ----------
@@ -189,9 +193,9 @@ def test_choose_resume():
 
 
 def test_wants_resume():
-    assert wants_resume("嗯，接着上次聊吧！")
-    assert wants_resume("我们 继续刚才的话题")
-    assert not wants_resume("上次那个文件在哪")
+    assert match_resume("嗯，接着上次聊吧！") is not None
+    assert match_resume("我们 继续刚才的话题") is not None
+    assert match_resume("上次那个文件在哪") is None
 
 
 # ---------- provider ----------

@@ -5,9 +5,7 @@
 - 登录后用 HttpOnly + SameSite=Strict 的 cookie 保持会话；写操作只接受 JSON 请求。
 - API Key 只写不读：接口永远不返回完整的 Key。
 
-接口分两层：
-- /admin/api/modules/...：通用的条目编辑（保留给脚本和测试使用）；
-- /admin/api/llm、asr、tts、intent：页面使用的接口，只暴露后台要管理的内容，并做取值校验。
+页面使用的接口（/admin/api/llm、asr、tts、intent 等）只暴露后台要管理的内容，并做取值校验。
 """
 
 import asyncio
@@ -35,7 +33,6 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
-SECTION_TITLES = {"LLM": "大模型", "ASR": "语音识别", "TTS": "语音合成", "Intent": "意图识别"}
 EMOTION_EMOJI = {name: emoji for emoji, name in EMOJI_MAP.items()}
 
 
@@ -75,9 +72,6 @@ class AdminHandler:
                 web.get("/admin/api/tts/preview", self.handle_tts_preview),
                 web.get("/admin/api/intent", self.handle_intent),
                 web.post("/admin/api/intent", self.handle_intent_save),
-                web.get("/admin/api/modules/{section}", self.handle_module_list),
-                web.post("/admin/api/modules/{section}/select", self.handle_module_select),
-                web.post("/admin/api/modules/{section}/entries/{name}", self.handle_module_update),
             ]
         )
 
@@ -188,12 +182,6 @@ class AdminHandler:
             return config_store.load_merged(custom_path=self.config_path)
         return config_store.load_merged()
 
-    def _section(self, request: web.Request) -> str:
-        section = request.match_info["section"]
-        if section not in config_store.SECTIONS:
-            raise web.HTTPNotFound(text='{"ok": false, "error": "未知模块"}', content_type="application/json")
-        return section
-
     def _running(self, section: str):
         return (self.config.get("selected_module") or {}).get(section)
 
@@ -292,43 +280,6 @@ class AdminHandler:
         merged = await self._blocking(self._merged)
         status = await self._blocking(collect_status, self.config, merged)
         return self._json({"ok": True, **status})
-
-    async def handle_module_list(self, request: web.Request):
-        self._require_login(request)
-        section = self._section(request)
-        data = config_store.describe_section(await self._blocking(self._merged), section)
-        data["running"] = self._running(section)
-        for entry in data["entries"]:
-            entry["missing"] = list(await self._blocking(deps.missing_packages, section, entry["type"]))
-        return self._json({"ok": True, **data})
-
-    async def handle_module_update(self, request: web.Request):
-        self._require_login(request)
-        section = self._section(request)
-        name = request.match_info["name"]
-        body = await self._read_json(request)
-        try:
-            merged = await self._blocking(self._merged)
-            changed = await self._blocking(config_store.update_entry, section, name, body, merged, self.config_path)
-        except KeyError:
-            return self._error(f"没有名为 {name} 的配置", 404)
-        except ValueError as e:
-            return self._error(f"格式不对：{e}", 400)
-        self.logger.bind(tag=TAG).info(f"管理后台更新了 {section}.{name}: {', '.join(changed) or '无变化'}")
-        return self._json({"ok": True, "changed": changed, **await self._apply_if_selected(section, name, changed)})
-
-    async def handle_module_select(self, request: web.Request):
-        self._require_login(request)
-        section = self._section(request)
-        body = await self._read_json(request)
-        name = str(body.get("name") or "")
-        try:
-            result = await self._switch(section, name)
-        except KeyError:
-            return self._error(f"没有名为 {name} 的配置", 404)
-        if not result["ok"]:
-            return self._error(result["note"], 400)
-        return self._json(result)
 
     # ---------- 大模型 ----------
 
@@ -625,7 +576,7 @@ class AdminHandler:
         self._emotion_runs = {sid: r for sid, r in self._emotion_runs.items() if connections.get(sid) is not None}
         self._emotion_runs[session_id] = run
         self.logger.bind(tag=TAG).info(f"开始表情测试：设备 {conn.device_id}，共 {len(sequence)} 种，间隔 {interval} 秒")
-        return self._json({"ok": True, "interval": interval, "sequence": sequence})
+        return self._json({"ok": True, "total": len(sequence)})
 
     async def handle_emotion_stop(self, request: web.Request):
         self._require_login(request)

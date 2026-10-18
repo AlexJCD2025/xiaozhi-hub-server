@@ -34,7 +34,6 @@ def collect_status(config: dict, merged: dict) -> dict:
     ip = get_local_ip()
     server = config.get("server", {})
     http_port = int(server.get("http_port", 8003))
-    ws_port = int(server.get("port", 8000))
     selected = dict(merged.get("selected_module") or {})
     running = dict(config.get("selected_module") or {})
 
@@ -91,16 +90,13 @@ def collect_status(config: dict, merged: dict) -> dict:
             checks.append(_check("意图识别", False, "Claude 在 function_call 模式下表情和回复长度都有问题，建议用 nointent",
                                  level="warn"))
 
-    pending = {k: v for k, v in selected.items() if running.get(k) != v and k in config_store.SECTIONS}
     return {
         "addresses": {
             "ip": ip,
             "ota": f"http://{ip}:{http_port}/xiaozhi/ota/",
-            "websocket": f"ws://{ip}:{ws_port}/xiaozhi/v1/",
             "admin": f"http://{ip}:{http_port}/admin",
         },
         "modules": {k: {"selected": selected.get(k), "type": config_store.entry_type(merged, k),
                         "running": running.get(k)} for k in config_store.SECTIONS},
-        "pending": pending,
         "checks": checks,
     }
