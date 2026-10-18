@@ -20,7 +20,7 @@ from pathlib import Path
 from aiohttp import web
 
 from config.logger import setup_logging
-from core.admin import auth, catalog, config_store, connections, deps, pages
+from core.admin import auth, catalog, config_store, connections, deps, pages, pipeline
 from core.admin.status import _claude_version, collect_status
 from core.utils.modules_initialize import initialize_modules
 from core.utils.textUtils import EMOJI_MAP
@@ -68,6 +68,7 @@ class AdminHandler:
                 web.post("/admin/api/llm/vendors/{vendor}", self.handle_llm_vendor),
                 web.post("/admin/api/llm/vendors/{vendor}/test", self.handle_llm_vendor_test),
                 web.post("/admin/api/llm/use", self.handle_llm_use),
+                web.get("/admin/api/pipeline", self.handle_pipeline),
                 web.get("/admin/api/asr", self.handle_asr),
                 web.get("/admin/api/tts", self.handle_tts),
                 web.post("/admin/api/tts", self.handle_tts_save),
@@ -442,6 +443,13 @@ class AdminHandler:
             except KeyError:
                 result["note"] += f"；配置里没有 {intent}，请检查意图识别"
         return self._json(result)
+
+    # ---------- 工作原理 ----------
+
+    async def handle_pipeline(self, request: web.Request):
+        self._require_login(request)
+        merged = await self._blocking(self._merged)
+        return self._json({"ok": True, **await self._blocking(pipeline.describe, merged)})
 
     # ---------- 语音识别、语音合成 ----------
 
