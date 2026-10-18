@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.util import audio_to_data
+from core.agent.call_names import handle_call_name
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.utils.output_counter import check_device_output_limit
@@ -90,6 +91,11 @@ async def startToChat(conn: "ConnectionHandler", text):
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         await handleAbortMessage(conn)
+
+    # [xiaozhi-hub] 呼名：句首"嗨 Claude"先去掉称呼；只有称呼时直接回复，不发给模型
+    actual_text = await handle_call_name(conn, actual_text)
+    if actual_text is None:
+        return
 
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)
