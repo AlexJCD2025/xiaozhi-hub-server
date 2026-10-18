@@ -1,3 +1,26 @@
+<!-- xiaozhi-hub:start（本段为 xiaozhi-hub-server 新增，同步上游时保留） -->
+# xiaozhi-hub-server
+
+**兼容小智协议的社区项目**，基于 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（MIT）改造，不是小智官方项目。
+
+小智设备（StackChan、ESP32 开发板等）的本地中枢服务端：
+
+- **本机 Claude Code 接入**：设备可以语音对话、读取文件、执行任务，支持打断和上下文接续。
+- **轻量管理后台**：网页配置大模型、API Key、语音模块，查看自检结果和在线设备，不需要数据库和 Java。
+- **一键安装与启动**：源码运行，不需要 Docker。
+
+```bash
+bash scripts/install.sh   # 安装
+bash scripts/start.sh     # 启动；管理后台 http://127.0.0.1:16688/admin
+```
+
+👉 完整说明（与原项目的区别、配置、连接设备、常见问题、致谢与许可）见 **[docs/hub-server.md](docs/hub-server.md)**。
+
+> 以下是原项目 xiaozhi-esp32-server 的说明，保留原样供参考。其中的部署方式、端口和智控台等内容，与本项目的默认用法不同。
+
+---
+<!-- xiaozhi-hub:end -->
+
 [![Banners](docs/images/banner1.png)](https://github.com/xinnan-tech/xiaozhi-esp32-server)
 
 <h1 align="center">小智后端服务xiaozhi-esp32-server</h1>
