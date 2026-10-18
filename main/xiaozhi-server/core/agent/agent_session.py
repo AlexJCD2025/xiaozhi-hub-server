@@ -32,7 +32,7 @@ VOICE_ERROR_MESSAGES = {
     ErrorKind.SERVER: "Claude 那边暂时有点问题，稍后再试吧。",
     ErrorKind.SESSION_MISSING: "没有找到之前的对话，我们重新开始吧。",
     ErrorKind.PROCESS_EXITED: "Claude Code 意外退出了，再说一次试试。",
-    ErrorKind.TIMEOUT: "这件事有点久，我稍后再告诉你。",
+    ErrorKind.TIMEOUT: "这件事有点久，我先停下了，你可以换个说法再问我。",
     ErrorKind.STALLED: "Claude 那边一直没有回应，可能是网络或服务有点慢，稍后再问我一次吧。",
     ErrorKind.UNKNOWN: "出了点小问题，再说一次试试。",
 }
