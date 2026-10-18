@@ -93,8 +93,8 @@ EDGE_VOICES = [
 ]
 EDGE_VOICE_VALUES = {v["value"] for v in EDGE_VOICES}
 VOICE_SAMPLE = {
-    "普通话": "你好，我是小智。今天想聊点什么？",
-    "粤语": "你好，我係小智。今日想傾啲乜嘢？",
+    "普通话": "你好，今天想聊点什么？",
+    "粤语": "你好，今日想傾啲乜嘢？",
 }
 
 

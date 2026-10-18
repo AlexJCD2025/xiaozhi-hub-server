@@ -224,7 +224,7 @@ async def test_devices_and_emotion_test(client):
         assert devices[0]["device_id"] == "dev-1"
         r = await client.post("/admin/api/devices/s-1/emotion-test", json={"interval": 0.5})
         data = await r.json()
-        assert r.status == 200 and data["total"] == 21
+        assert r.status == 200 and data == {"ok": True}
         import asyncio
         for _ in range(200):  # conftest 让 asyncio.sleep 立即返回，后台任务几轮调度即可发完
             if len(sent) == 21:
