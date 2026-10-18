@@ -35,7 +35,7 @@ bash scripts/start.sh
 | 运行内存 | 约 0.9GB | 使用 FunASR 时约 1.6GB，识别时峰值约 2.8GB |
 | 可用模块 | 默认组合：SileroVAD、SherpaASR、EdgeTTS、Claude CLI 和 OpenAI 兼容接口的大模型等 | 原项目的所有模块 |
 
-精简安装时，管理后台会把缺少依赖的模块标为"未安装"，不能切换过去。之前完整安装过、想改为精简安装的，删除 `main/xiaozhi-server/.venv` 后重新运行安装脚本即可。依赖清单见 `main/xiaozhi-server/requirements-hub-core.txt`，版本跟随原项目的 `requirements.txt`。
+管理后台能选的模块（语音识别 SherpaASR、语音合成 EdgeTTS、Claude CLI 和各家 OpenAI 兼容接口的大模型）在精简安装下都能用，一般不需要完整安装。只有手动编辑 `data/.config.yaml`、改用原项目的其他模块（如 FunASR）时才需要。之前完整安装过、想改为精简安装的，删除 `main/xiaozhi-server/.venv` 后重新运行安装脚本即可。依赖清单见 `main/xiaozhi-server/requirements-hub-core.txt`，版本跟随原项目的 `requirements.txt`。
 
 可选环境变量：
 
