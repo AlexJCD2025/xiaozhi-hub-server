@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # xiaozhi-hub-server 一键安装（macOS / Linux）
-# 用法：bash scripts/install.sh
+# 用法：bash scripts/install.sh [--full]
+#   默认精简安装：不装 torch、FunASR 等，语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
+#   --full       完整安装原项目全部依赖，并额外下载 FunASR 的模型（约 900MB），可在管理后台切换到原项目的所有模块
 # 可选环境变量：
 #   UV_INDEX_URL   Python 包镜像，例如 https://mirrors.aliyun.com/pypi/simple/
 #   ASSUME_YES=1   所有询问都按默认回答（非交互安装）
@@ -10,9 +12,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER="$ROOT/main/xiaozhi-server"
 VENV="$SERVER/.venv"
 PY="$VENV/bin/python"
-MODEL="$SERVER/models/SenseVoiceSmall/model.pt"
-MODEL_URL="https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt"
-MODEL_MIN_BYTES=900000000
+# 默认的语音识别模型：sherpa-onnx 版 SenseVoice（int8），目录与原项目 config.yaml 中 SherpaASR 的 model_dir 一致
+SHERPA_DIR="$SERVER/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
+SHERPA_URL="https://modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master"
+# 完整安装时额外下载：FunASR 使用的 SenseVoiceSmall
+FUNASR_MODEL="$SERVER/models/SenseVoiceSmall/model.pt"
+FUNASR_URL="https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt"
 CONFIG="$SERVER/data/.config.yaml"
 
 step() { printf "\n\033[1m==> %s\033[0m\n" "$*"; }
@@ -26,7 +31,25 @@ ask() {
   answer="${answer:-$default}"
   [[ "$answer" =~ ^[Yy] ]]
 }
+# download <地址> <保存路径> <最小字节数>：断点续传，下载完校验大小
+download() {
+  local url="$1" dest="$2" min="$3"
+  if (( $(file_size "$dest") >= min )); then info "已存在，跳过：$dest"; return; fi
+  mkdir -p "$(dirname "$dest")"
+  curl -L --fail --retry 3 -C - -o "$dest.part" "$url" || fail "下载失败，可重新运行本脚本断点续传：$url"
+  (( $(file_size "$dest.part") >= min )) || fail "文件大小异常，请删除 $dest.part 后重试"
+  mv "$dest.part" "$dest"
+  info "已下载：$dest"
+}
 file_size() { "$PY" -c 'import os,sys; print(os.path.getsize(sys.argv[1]) if os.path.exists(sys.argv[1]) else 0)' "$1"; }
+
+FULL=0
+for arg in "$@"; do
+  case "$arg" in
+    --full) FULL=1 ;;
+    *) fail "未知参数：$arg（可用参数：--full）" ;;
+  esac
+done
 
 OS="$(uname -s)"
 [[ "$OS" == "Darwin" || "$OS" == "Linux" ]] || fail "不支持的系统：$OS（Windows 请使用 scripts/install.ps1）"
@@ -90,19 +113,24 @@ else
 fi
 
 # ---------- 4. Python 依赖 ----------
-step "安装 Python 依赖（首次较慢，torch 等体积较大）"
-"$PY" "$ROOT/scripts/install_deps.py" --python "$PY" || fail "Python 依赖安装失败"
+if (( FULL )); then
+  step "安装 Python 依赖（完整安装，首次较慢，torch 等体积较大）"
+  "$PY" "$ROOT/scripts/install_deps.py" --python "$PY" --full || fail "Python 依赖安装失败"
+else
+  step "安装 Python 依赖（精简安装）"
+  "$PY" "$ROOT/scripts/install_deps.py" --python "$PY" || fail "Python 依赖安装失败"
+  if "$PY" -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("torch") else 1)' 2>/dev/null; then
+    info "提示：虚拟环境里还留有之前完整安装的 torch 等依赖。想释放空间，可以删除 $VENV 后重新运行本脚本"
+  fi
+fi
 
 # ---------- 5. 语音识别模型 ----------
-step "下载语音识别模型 SenseVoiceSmall（约 900MB）"
-if (( $(file_size "$MODEL") >= MODEL_MIN_BYTES )); then
-  info "已存在，跳过：$MODEL"
-else
-  mkdir -p "$(dirname "$MODEL")"
-  curl -L --fail --retry 3 -C - -o "$MODEL.part" "$MODEL_URL" || fail "模型下载失败，可重新运行本脚本断点续传"
-  (( $(file_size "$MODEL.part") >= MODEL_MIN_BYTES )) || fail "模型文件大小异常，请删除 $MODEL.part 后重试"
-  mv "$MODEL.part" "$MODEL"
-  info "已下载：$MODEL"
+step "下载语音识别模型 SenseVoice（sherpa-onnx int8 版，约 240MB）"
+download "$SHERPA_URL/model.int8.onnx" "$SHERPA_DIR/model.int8.onnx" 200000000
+download "$SHERPA_URL/tokens.txt" "$SHERPA_DIR/tokens.txt" 100000
+if (( FULL )); then
+  step "下载 FunASR 语音识别模型 SenseVoiceSmall（约 900MB，完整安装才需要）"
+  download "$FUNASR_URL" "$FUNASR_MODEL" 900000000
 fi
 
 # ---------- 6. 配置文件 ----------
@@ -131,6 +159,20 @@ PYEOF
     info "大模型：ChatGLMLLM（智谱 glm-4-flash，需要在管理后台填写 API Key）"
   fi
   info "已生成：$CONFIG"
+fi
+
+# 精简安装没有 FunASR：之前完整安装时选了 FunASR 的配置，切换到 SherpaASR（同一个 SenseVoice 模型）
+if (( ! FULL )) && [[ "$(cd "$SERVER" && "$PY" - <<'PYEOF' 2>/dev/null
+from core.admin import config_store
+print(config_store.entry_type(config_store.load_merged(), "ASR"))
+PYEOF
+)" == "fun_local" ]]; then
+  if ask "当前配置的语音识别是 FunASR，精简安装不包含它。切换到 SherpaASR（同一个 SenseVoice 模型，内存约减半）？" Y; then
+    (cd "$SERVER" && "$PY" -c 'from core.admin import config_store; config_store.select_entry("ASR", "SherpaASR", config_store.load_merged())' 2>/dev/null) \
+      && info "语音识别已切换为 SherpaASR" || info "切换失败，请在管理后台的「语音识别」页切换"
+  else
+    info "保持 FunASR。需要它时请用完整安装：bash scripts/install.sh --full"
+  fi
 fi
 
 # ---------- 7. Claude Code ----------

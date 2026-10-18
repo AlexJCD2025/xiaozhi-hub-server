@@ -1,16 +1,22 @@
 # xiaozhi-hub-server 一键安装（Windows PowerShell）
 # ⚠️ 未实测：本脚本按 macOS 上实测过的 install.sh 逐步对照编写，尚未在 Windows 上运行验证。
-# 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+# 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-Full]
+#   默认精简安装：不装 torch、FunASR 等，语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
+#   -Full        完整安装原项目全部依赖，并额外下载 FunASR 的模型（约 900MB）
 # 可选环境变量：$env:UV_INDEX_URL（Python 包镜像），$env:ASSUME_YES = "1"（非交互）
+param([switch]$Full)
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Server = Join-Path $Root "main\xiaozhi-server"
 $Venv = Join-Path $Server ".venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
-$Model = Join-Path $Server "models\SenseVoiceSmall\model.pt"
-$ModelUrl = "https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt"
-$ModelMinBytes = 900000000
+# 默认的语音识别模型：sherpa-onnx 版 SenseVoice（int8），目录与原项目 config.yaml 中 SherpaASR 的 model_dir 一致
+$SherpaDir = Join-Path $Server "models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
+$SherpaUrl = "https://modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master"
+# 完整安装时额外下载：FunASR 使用的 SenseVoiceSmall
+$FunasrModel = Join-Path $Server "models\SenseVoiceSmall\model.pt"
+$FunasrUrl = "https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt"
 $Config = Join-Path $Server "data\.config.yaml"
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -26,6 +32,17 @@ function Ask($question, $default = "N") {
     return $answer -match "^[Yy]"
 }
 function Has($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+# 断点续传下载，下载完校验大小
+function Download($url, $dest, $minBytes) {
+    if ((Test-Path $dest) -and ((Get-Item $dest).Length -ge $minBytes)) { Info "已存在，跳过：$dest"; return }
+    New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+    $part = "$dest.part"
+    if (Has "curl.exe") { curl.exe -L --fail --retry 3 -C - -o $part $url }
+    else { Invoke-WebRequest -Uri $url -OutFile $part }
+    if (-not (Test-Path $part) -or (Get-Item $part).Length -lt $minBytes) { Fail "下载失败或文件大小异常，请重新运行本脚本：$url" }
+    Move-Item -Force $part $dest
+    Info "已下载：$dest"
+}
 
 # ---------- 1. uv ----------
 Step "检查 uv（用于管理 Python 版本和虚拟环境）"
@@ -58,8 +75,13 @@ if ((Test-Path $Py) -and ((& $Py -c "import sys; print(sys.version_info[:2] == (
 } else { uv venv --python 3.10 $Venv }
 
 # ---------- 4. Python 依赖 ----------
-Step "安装 Python 依赖（首次较慢，torch 等体积较大）"
-& $Py (Join-Path $Root "scripts\install_deps.py") --python $Py
+if ($Full) {
+    Step "安装 Python 依赖（完整安装，首次较慢，torch 等体积较大）"
+    & $Py (Join-Path $Root "scripts\install_deps.py") --python $Py --full
+} else {
+    Step "安装 Python 依赖（精简安装）"
+    & $Py (Join-Path $Root "scripts\install_deps.py") --python $Py
+}
 if ($LASTEXITCODE -ne 0) { Fail "Python 依赖安装失败" }
 
 # ---------- 5. opus ----------
@@ -74,16 +96,12 @@ else {
 }
 
 # ---------- 6. 语音识别模型 ----------
-Step "下载语音识别模型 SenseVoiceSmall（约 900MB）"
-if ((Test-Path $Model) -and ((Get-Item $Model).Length -ge $ModelMinBytes)) { Info "已存在，跳过：$Model" }
-else {
-    New-Item -ItemType Directory -Force -Path (Split-Path $Model) | Out-Null
-    $part = "$Model.part"
-    if (Has "curl.exe") { curl.exe -L --fail --retry 3 -C - -o $part $ModelUrl }
-    else { Invoke-WebRequest -Uri $ModelUrl -OutFile $part }
-    if (-not (Test-Path $part) -or (Get-Item $part).Length -lt $ModelMinBytes) { Fail "模型下载失败或文件大小异常，请重新运行本脚本" }
-    Move-Item -Force $part $Model
-    Info "已下载：$Model"
+Step "下载语音识别模型 SenseVoice（sherpa-onnx int8 版，约 240MB）"
+Download "$SherpaUrl/model.int8.onnx" (Join-Path $SherpaDir "model.int8.onnx") 200000000
+Download "$SherpaUrl/tokens.txt" (Join-Path $SherpaDir "tokens.txt") 100000
+if ($Full) {
+    Step "下载 FunASR 语音识别模型 SenseVoiceSmall（约 900MB，完整安装才需要）"
+    Download $FunasrUrl $FunasrModel 900000000
 }
 
 # ---------- 7. 配置文件 ----------
@@ -102,6 +120,19 @@ else {
     }
     [System.IO.File]::WriteAllText($Config, $text, (New-Object System.Text.UTF8Encoding $false))
     Info "已生成：$Config"
+}
+
+# 精简安装没有 FunASR：之前完整安装时选了 FunASR 的配置，切换到 SherpaASR（同一个 SenseVoice 模型）
+if (-not $Full) {
+    Push-Location $Server
+    $asrType = & $Py -c "from core.admin import config_store; print(config_store.entry_type(config_store.load_merged(), 'ASR'))" 2>$null
+    if ($asrType -eq "fun_local") {
+        if (Ask "当前配置的语音识别是 FunASR，精简安装不包含它。切换到 SherpaASR（同一个 SenseVoice 模型，内存约减半）？" "Y") {
+            & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaASR', config_store.load_merged())" 2>$null
+            if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaASR" } else { Info "切换失败，请在管理后台的「语音识别」页切换" }
+        } else { Info "保持 FunASR。需要它时请用完整安装：scripts\install.ps1 -Full" }
+    }
+    Pop-Location
 }
 
 # ---------- 8. Claude Code ----------
