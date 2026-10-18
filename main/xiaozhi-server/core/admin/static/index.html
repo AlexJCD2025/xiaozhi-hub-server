@@ -882,6 +882,7 @@ async function renderCallNames(root) {
   const d = await api("call-names");
   let aliases = [...d.aliases];
   let learning = d.learning, devices = d.devices;
+  setOnline(devices);
   root.innerHTML = `
     <div class="page-head"><div><h1>呼名</h1><p class="sub">唤醒设备后，句子开头说“嗨 + 称呼”，指定由 ${esc(d.target)} 回答。</p></div>
       <span class="pill ${d.enabled ? "ok" : ""}">${d.enabled ? "已开启" : "已关闭"}</span></div>
@@ -954,7 +955,7 @@ async function renderCallNames(root) {
   const poll = () => {
     clearInterval(page.timer);
     page.timer = setInterval(async () => {
-      try { const r = await api("call-names"); learning = r.learning; devices = r.devices; } catch (e) { return; }
+      try { const r = await api("call-names"); learning = r.learning; devices = r.devices; setOnline(devices); } catch (e) { return; }
       drawLearn();
       if (!learning.active) { clearInterval(page.timer); page.timer = null; }
     }, 1500);
