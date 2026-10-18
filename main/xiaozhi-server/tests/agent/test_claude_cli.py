@@ -548,3 +548,20 @@ def test_wants_resume_ignores_negation():
     assert not wants_resume("别接着上次聊了，换个话题")
     assert not wants_resume("不要继续刚才的话题")
     assert wants_resume("别管了，接着上次聊吧")  # 否定词不紧挨关键字
+
+
+def test_wants_resume_tolerates_one_wrong_char():
+    # 真机录音：SenseVoice 把"接着上次聊"识别成了"接着上次量"
+    assert wants_resume("接着上次量。")
+    assert wants_resume("嗯，继续刚才的话提")
+    assert not wants_resume("接着上次聊", keywords=["接着上次聊吧"])  # 只容忍错字，不容忍少字
+    assert not wants_resume("别接着上次量了")  # 否定词判断同样适用
+    assert not wants_resume("接着说上次量")  # 错 2 个字以上不算
+    assert not wants_resume("上次那个文件在哪")
+    assert wants_resume("嗯，我们接着上次量吧")  # 首尾的语气词不影响
+    # 长句里只差 1 个字的片段多半是真问题：命中接续指令后这句话不会发给 Claude，不能误判
+    assert not wants_resume("接着上次买的那个东西怎么用")
+    assert not wants_resume("接着刚才写代码")
+    # 4 个字以内的关键字必须完全一致，避免误触发
+    assert wants_resume("接着聊", keywords=["接着聊"])
+    assert not wants_resume("接着量", keywords=["接着聊"])

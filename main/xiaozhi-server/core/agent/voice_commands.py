@@ -14,16 +14,38 @@ def normalize(text: str) -> str:
 NEGATIONS = ("不要", "不用", "别", "不想", "不必", "甭")
 
 
+# 关键字至少这么长时，允许错 1 个字：语音识别常把个别字认错（实测"接着上次聊"被识别成"接着上次量"）
+FUZZY_MIN_LEN = 5
+# 只在整句话基本就是这条指令时才允许错字：命中接续指令后这句话不会发给 Claude，
+# 长句里相近的片段（如"接着上次买的那个东西怎么用"）多半是真问题，误判会把问题吞掉
+_LEADING_FILLERS = re.compile(r"^(?:嗯|啊|呃|哦|喂|那|好的|好|那么|我们|咱们)+")
+_TRAILING_FILLERS = re.compile(r"(?:吧|啊|呀|呢|啦|了|好吗|行吗|可以吗)+$")
+
+
+def _negated(t: str, start: int) -> bool:
+    return any(t[:start].endswith(n) for n in NEGATIONS)
+
+
 def wants_resume(text: str, keywords=None) -> bool:
-    """去掉空白和标点后，包含任一关键字就算命中；关键字前面紧跟否定词（如"别接着上次聊"）则不算。"""
+    """去掉空白和标点后，包含任一关键字就算命中；关键字前面紧跟否定词（如"别接着上次聊"）则不算。
+
+    容忍语音识别的错字：5 个字及以上的关键字，在整句话（去掉首尾语气词后）最多比关键字多 1 个字时，
+    允许有 1 个字不同（同样长度，不容忍多字、少字）。
+    """
     t = normalize(text)
-    for k in keywords or DEFAULT_RESUME_KEYWORDS:
-        k = normalize(k)
-        if not k:
-            continue
+    keys = [k for k in (normalize(k) for k in (keywords or DEFAULT_RESUME_KEYWORDS)) if k]
+    for k in keys:
         start = t.find(k)
         while start != -1:
-            if not any(t[:start].endswith(n) for n in NEGATIONS):
+            if not _negated(t, start):
                 return True
             start = t.find(k, start + 1)
+    core = _TRAILING_FILLERS.sub("", _LEADING_FILLERS.sub("", t))
+    for k in keys:
+        if len(k) < FUZZY_MIN_LEN or len(core) > len(k) + 1:
+            continue
+        for start in range(len(core) - len(k) + 1):
+            window = core[start:start + len(k)]
+            if sum(a != b for a, b in zip(window, k)) <= 1 and not _negated(core, start):
+                return True
     return False
