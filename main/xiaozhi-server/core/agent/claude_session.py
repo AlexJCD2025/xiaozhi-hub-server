@@ -287,11 +287,15 @@ class ClaudeSession(AgentSession):
                 elif isinstance(msg, UserMessage) and msg.parent_tool_use_id is None and isinstance(msg.content, list):
                     pending_tools.difference_update(b.tool_use_id for b in msg.content if isinstance(b, ToolResultBlock))
                 is_text = isinstance(msg, StreamEvent) and ((msg.event or {}).get("delta") or {}).get("type") == "text_delta"
-                # 不算在干活：初始化、限流信息、收尾的结果，以及伪装成 assistant 消息的错误（没登录、额度用完等）。
-                # 没登录时只会收到这几种消息；报成 Activity 的话，上层会以为 Claude 已经开始处理，
-                # 把新会话 ID 记下来，覆盖之前能接续的会话
-                not_work = (isinstance(msg, SystemMessage) and msg.subtype == "init") or isinstance(
-                    msg, (RateLimitEvent, ResultMessage)) or (
+                # 初始化单独报一次 label 为 init 的 Activity：这时会话已经建好、用户的话已经存进去，但 Claude 还没开始干活。
+                # 实测没登录时是 init → 伪装成 assistant 的错误 → result；和 Anthropic 的网络卡住时只有 init，之后没有动静。
+                # 上层靠 init 之后来的是错误还是别的事件来区分这两种情况（见 claude_cli 的 _run_turn）
+                if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                    last_activity = time.monotonic()
+                    yield Activity("init", tools_running=len(pending_tools))
+                    continue
+                # 不算在干活：限流信息、收尾的结果，以及伪装成 assistant 消息的错误（没登录、额度用完等），不报 Activity
+                not_work = isinstance(msg, (RateLimitEvent, ResultMessage)) or (
                     isinstance(msg, AssistantMessage) and bool(msg.error or msg.model == "<synthetic>"))
                 # 节流：每秒最多一次；正在执行的工具数变了要马上告诉调用方
                 if not not_work and ((not is_text and time.monotonic() - last_activity >= 1)
