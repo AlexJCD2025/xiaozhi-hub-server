@@ -336,7 +336,13 @@ class LLMProvider(LLMProviderBase):
                 if await self._ensure_agent(st, text, out, system_prompt):
                     self.store.touch(st.key, st.agent.session_id)
                     return
-                async for ev in st.agent.send(text):
+                agent, recorded = st.agent, False
+                async for ev in agent.send(text):
+                    if not recorded and not isinstance(ev, Error):
+                        # Claude 已经开始处理，会话已存在于本机。马上记下来：这一轮如果超时卡死、进程被强制关闭，
+                        # 下一句话启动新进程时也能接回这个会话（原来要等一轮正常结束才记，新会话的第一轮卡死就接不上了）
+                        self.store.touch(st.key, agent.session_id)
+                        recorded = True
                     out.put(ev)
                     if isinstance(ev, Error) and ev.kind == ErrorKind.PROCESS_EXITED:
                         st.agent = None

@@ -506,7 +506,7 @@ def test_turn_timeout_interrupts(provider):
     c = conn()
     provider.on_conn_open(c)
     out = run(provider, c, "很久的任务")
-    assert "有点久" in out
+    assert "做得太久" in out and "说继续" in out
     deadline = time.time() + 2
     while FakeAgent.instances[0].interrupts == 0 and time.time() < deadline:
         time.sleep(0.05)
@@ -578,6 +578,28 @@ def test_progress_not_inserted_mid_sentence(provider):
     c = conn()
     provider.on_conn_open(c)
     assert run(provider, c, "看看") == "🙂我先看看那个文件。"  # 半句话中间不插进度
+
+
+def test_session_recorded_as_soon_as_claude_starts(provider):
+    """新会话的第一轮超时卡住时，会话也已经记下：进程被强制关闭后，下一句话还能接回来。"""
+    from core.agent.agent_session import Activity
+    provider.filler, provider.turn_timeout, provider.stall_timeout = "", 0.5, 5
+    FakeAgent.script = [[Activity("SystemMessage"), 3.0, Done()]]  # 开始处理后一直不结束
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "整理一下文件")
+    assert "说继续" in out  # 超时提示告诉用户怎么接着做
+    assert provider.store.get("dev-1")["session_id"] == "new-0"
+
+
+def test_session_not_recorded_when_first_event_is_error(provider):
+    """一开始就出错（例如没登录）时不记，免得覆盖之前能接续的会话。"""
+    provider.store.touch("dev-1", "old-session")
+    FakeAgent.script = [[Error(ErrorKind.AUTH, "not logged in")]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert provider.store.get("dev-1")["session_id"] == "old-session"
 
 
 def test_abort_and_close_hooks(provider):
