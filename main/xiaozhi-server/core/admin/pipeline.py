@@ -77,7 +77,7 @@ def _voice_name(voice: str) -> str:
 
 def _llm_label(name: str, entry: dict) -> str:
     if entry.get("type") == "claude_cli":
-        return "Claude Code CLI"
+        return "Claude Code"
     vendor = catalog.VENDOR_BY_ENTRY.get(name)
     return vendor["label"] if vendor else name
 
