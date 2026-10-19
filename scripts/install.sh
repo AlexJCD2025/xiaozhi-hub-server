@@ -180,12 +180,37 @@ print(port)
 PYEOF
 )"
 
+# update.sh 调用时到这里就结束：重启服务由 update.sh 处理
+[[ "${HUB_UPDATING:-0}" == "1" ]] && exit 0
+
+# ---------- 9. 开机自启 ----------
+step "开机自启"
+AUTOSTART=0
+if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
+  # 重新运行安装脚本（例如补装依赖）后，让后台服务用上新装的依赖
+  AUTOSTART=1
+  bash "$ROOT/scripts/autostart.sh" restart >/dev/null && info "已开启开机自启，后台服务已重启"
+elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" N; then
+  if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1; else
+    info "设置失败，可以稍后运行 bash \"$ROOT/scripts/autostart.sh\" enable 重试"
+  fi
+else
+  info "没有设置。以后想开启：bash \"$ROOT/scripts/autostart.sh\" enable"
+fi
+
+if [[ "$AUTOSTART" == "1" ]]; then
+  START_HINT="服务已在后台运行，开机后会自动启动。查看状态：bash \"$ROOT/scripts/autostart.sh\" status"
+else
+  START_HINT="启动服务：bash \"$ROOT/scripts/start.sh\""
+fi
+
 cat <<EOF
 
-安装完成。
+安装完成。安装目录：$ROOT
 
-  启动服务：  bash scripts/start.sh
+  ${START_HINT}
   首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:${HTTP_PORT}/admin 设置密码。
+  以后更新到最新版本：bash "$ROOT/scripts/update.sh"
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。
