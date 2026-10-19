@@ -658,7 +658,7 @@ class AdminHandler:
             return self._error("意图识别只能选“不用插件”或“用插件”", 400)
         merged = await self._blocking(self._merged)
         if pages.llm_kind(merged) == "cli" and mode != "nointent":
-            return self._error("使用 Claude Code CLI 时只能选“不用插件”", 400)
+            return self._error("使用 Claude Code 时只能选“不用插件”", 400)
         notes = []
         try:
             if "functions" in body:

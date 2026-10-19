@@ -49,6 +49,8 @@
   .side-foot a:hover { color: #e2e8f0; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #64748b; margin-right: 6px; vertical-align: 1px; }
   .dot.on { background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, .2); }
+  .dot.off { background: #f87171; }
+  #online-short { display: none; }
   main { padding: 28px 36px 72px; max-width: 1080px; width: 100%; }
 
   /* ---------- 通用元素 ---------- */
@@ -217,7 +219,7 @@
   details.prompt-all > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 14px 22px; }
   details.prompt-all > summary::-webkit-details-marker { display: none; }
   details.prompt-all > summary .toggle { margin-left: auto; color: var(--muted); font-size: 12px; }
-  details.prompt-all[open] > summary { margin-bottom: 12px; }
+  details.prompt-all > .banner { margin: 12px 0 0; }
   .how-foot { margin-top: 28px; color: var(--muted); font-size: 13px; }
   .seg-card + .seg-card { margin-top: 12px; }
   .seg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 22px; }
@@ -256,7 +258,11 @@
     .nav button { width: auto; white-space: nowrap; margin: 0; padding: 7px 10px; }
     .nav button.active { box-shadow: inset 0 -2px 0 #818cf8; }
     .nav .ico { display: none; }
-    .side-foot { display: none; }
+    .side-foot { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; white-space: nowrap; flex: none; }
+    .side-foot .row { margin: 0; }
+    .side-foot #logout, #online-text { display: none; }
+    #online-short { display: inline; }
+    .side-foot .dot { margin-right: 4px; }
     main { padding: 20px 16px 56px; }
     .choices, .grid2, .grid3, .plugins, .tips, .levels { grid-template-columns: 1fr; }
     .cli-row { grid-template-columns: 1fr; gap: 6px; } .cli-k { padding-top: 0; }
@@ -307,7 +313,7 @@
       <button data-page="tts"><span class="ico">♪</span>语音合成</button>
       <button data-page="intent"><span class="ico">⚙</span>意图识别</button>
     </nav>
-    <div class="side-foot"><span class="dot" id="online-dot"></span><span id="online-text">没有设备在线</span>
+    <div class="side-foot"><span class="dot" id="online-dot"></span><span id="online-text">没有设备在线</span><span id="online-short">无设备</span>
       <div class="row"><button id="logout">退出登录</button>
         <a href="https://github.com/justhalfbit/xiaozhi-hub-server" target="_blank" rel="noopener" title="xiaozhi-hub-server 开源仓库">GitHub ↗</a></div></div>
   </aside>
@@ -425,10 +431,16 @@ document.querySelectorAll("#nav button").forEach((b) => (b.onclick = () => openP
 window.addEventListener("hashchange", () => openPage(currentPage()));
 window.addEventListener("beforeunload", (e) => { if (page.dirty && page.dirty()) { e.preventDefault(); e.returnValue = ""; } });
 
+// devices 为 null 表示连不上服务：不能停在上一次的结果上，否则服务停了还显示"1 台设备在线"
 function setOnline(devices) {
-  $("online-dot").classList.toggle("on", devices.length > 0);
-  $("online-text").textContent = devices.length ? `${devices.length} 台设备在线` : "没有设备在线";
+  $("online-dot").classList.toggle("on", !!devices && devices.length > 0);
+  $("online-dot").classList.toggle("off", !devices);
+  $("online-text").textContent = !devices ? "连不上服务" : devices.length ? `${devices.length} 台设备在线` : "没有设备在线";
+  $("online-short").textContent = !devices ? "已断开" : devices.length ? `${devices.length} 台` : "无设备";  // 窄屏用
+  $("online-dot").parentElement.title = $("online-text").textContent;
 }
+const OFFLINE = "连不上服务";  // api() 连不上服务时抛出的错误以这几个字开头
+function onDevicesError(e) { if (String(e && e.message).startsWith(OFFLINE)) setOnline(null); }
 
 // 侧边栏的在线设备数不管在哪一页都要跟着变：登录后每 5 秒查一次。
 // 页面在后台时跳过；状态页、正在录入称呼的呼名页自己会查，这里也跳过，免得重复请求
@@ -436,7 +448,7 @@ let onlineTimer = null;
 function watchOnline() {
   const refresh = async () => {
     if (document.hidden || page.name === "status" || (page.name === "calls" && page.timer)) return;
-    try { setOnline((await api("devices")).devices); } catch (e) {}
+    try { setOnline((await api("devices")).devices); } catch (e) { onDevicesError(e); }
   };
   clearInterval(onlineTimer);
   refresh();
@@ -494,7 +506,7 @@ async function renderStatus(root) {
     const testing = (lastDevices?.devices || []).some((d) => d.emotion_test && d.emotion_test.running);
     if (document.hidden || (!testing && Date.now() - last < 5000)) return;
     last = Date.now();
-    try { const d = await api("devices"); setOnline(d.devices); renderDevices(d); } catch (e) {}
+    try { const d = await api("devices"); setOnline(d.devices); renderDevices(d); } catch (e) { onDevicesError(e); }
   }, 1500);
 }
 
@@ -610,7 +622,7 @@ async function renderLLM(root) {
   if (!llmVendor || !d.vendors.find((x) => x.id === llmVendor)) {
     llmVendor = d.vendor || (d.vendors.find((x) => x.configured) || d.vendors[0]).id;
   }
-  const current = usingCli ? `Claude Code CLI · ${v.model || "默认模型"}` : active ? `${active.label} · ${active.model}` : d.selected;
+  const current = usingCli ? `Claude Code · ${v.model || "默认模型"}` : active ? `${active.label} · ${active.model}` : d.selected;
   const customModel = !!v.model && !c.options.model.find((o) => o.value === v.model);
   const num = (name, label, hint) => `<label class="f">${label}${hint ? `<span class="hint">${hint}</span>` : ""}
     <input class="in" data-k="${name}" value="${esc(v[name] ?? "")}" inputmode="decimal"></label>`;
@@ -1143,7 +1155,7 @@ async function renderIntent(root) {
   root.innerHTML = `
     <div class="page-head"><div><h1>意图识别</h1><p class="sub">决定大模型能不能调用插件（查天气、听新闻、放音乐等）。</p></div>
       <span class="pill ok">当前：${esc(INTENT_LABEL[d.mode] || d.selected)}</span></div>
-    ${d.locked ? '<div class="banner info">正在使用 Claude Code CLI，只能选“不用插件”。Claude Code 有自己的工具（读文件、搜索等），不走这里的插件。切换到 API 模型后，这里会自动恢复上次的选择。</div>' : ""}
+    ${d.locked ? '<div class="banner info">正在使用 Claude Code，只能选“不用插件”。Claude Code 有自己的工具（读文件、搜索等），不走这里的插件。切换到 API 模型后，这里会自动恢复上次的选择。</div>' : ""}
     ${d.mode === "other" ? `<div class="banner warn">当前的 ${esc(d.selected)} 后台不再支持，请在下面选一种并保存。</div>` : ""}
     <div class="choices">
       <button class="choice" data-mode="nointent"><div class="mark" style="background:var(--soft)">💬</div>
@@ -1172,7 +1184,7 @@ async function renderIntent(root) {
     root.querySelectorAll("[data-fn]").forEach((i) => i.closest(".plugin").classList.toggle("on", i.checked));
   };
   root.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => {
-    if (d.locked && b.dataset.mode !== "nointent") return toast("使用 Claude Code CLI 时只能选“不用插件”", true);
+    if (d.locked && b.dataset.mode !== "nointent") return toast("使用 Claude Code 时只能选“不用插件”", true);
     mode = b.dataset.mode; sync();
   }));
   root.querySelectorAll("[data-fn]").forEach((i) => (i.onchange = sync));
@@ -1305,7 +1317,7 @@ async function renderCallNames(root) {
   const poll = () => {
     clearInterval(page.timer);
     page.timer = setInterval(async () => {
-      try { const r = await api("call-names"); learning = r.learning; devices = r.devices; setOnline(devices); } catch (e) { return; }
+      try { const r = await api("call-names"); learning = r.learning; devices = r.devices; setOnline(devices); } catch (e) { onDevicesError(e); return; }
       draw();
       if (!learning.active) { clearInterval(page.timer); page.timer = null; }
     }, 1500);
