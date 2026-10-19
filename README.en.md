@@ -47,7 +47,7 @@ listens, speaks      recognizes, routes, synthesizes            thinks and does 
 
 Requirements:
 
-- macOS or Linux (the Windows scripts have not been tested yet);
+- macOS or Linux with git; on macOS, [Homebrew](https://brew.sh) is needed if ffmpeg or opus is missing. The Windows scripts have not been tested yet, and Windows has no one-line install, autostart or update script yet;
 - the computer and the device on the same LAN;
 - to use Claude Code, install it first and run `claude` once in a terminal to sign in.
 

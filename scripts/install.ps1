@@ -28,6 +28,12 @@ function Ask($question, $default = "N") {
     }
     return $answer -match "^[Yy]"
 }
+# PowerShell 5.1 在 $ErrorActionPreference = "Stop" 时，会把原生命令写到 stderr 的内容（即使 2>$null）当成错误直接终止脚本。
+# 预期可能失败、只看退出码的命令用它运行
+function Quiet([scriptblock]$block) {
+    $old = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try { & $block 2>$null } finally { $ErrorActionPreference = $old }
+}
 function Has($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 # 断点续传下载，下载完校验大小
 function Download($url, $dest, $minBytes) {
@@ -78,7 +84,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Python 依赖安装失败" }
 
 # ---------- 5. opus ----------
 Step "检查 opus"
-& $Py -c "import opuslib_next" 2>$null
+Quiet { & $Py -c "import opuslib_next" }
 if ($LASTEXITCODE -eq 0) { Info "opus 可用" }
 else {
     Info "未找到 opus.dll。可选的处理方式："
@@ -115,11 +121,11 @@ else {
 
 # 旧配置里语音识别是 FunASR 或 SenseVoice 时，询问是否切换到默认的 X-ASR（中英混合更准，速度一样）
 Push-Location $Server
-$asrNow = & $Py -c "from core.admin import config_store; m = config_store.load_merged(); print(m['selected_module']['ASR'], config_store.entry_type(m, 'ASR'))" 2>$null
+$asrNow = Quiet { & $Py -c "from core.admin import config_store; m = config_store.load_merged(); print(m['selected_module']['ASR'], config_store.entry_type(m, 'ASR'))" }
 if ($asrNow) {
     $asrName, $asrType = $asrNow -split " ", 2
     if (($asrType -eq "fun_local" -or $asrName -eq "SherpaASR") -and (Ask "当前的语音识别是 $asrName。切换到 X-ASR（中英混合识别更准，速度一样）？" "Y")) {
-        & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaXASR', config_store.load_merged())" 2>$null
+        Quiet { & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaXASR', config_store.load_merged())" }
         if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaXASR" } else { Info "切换失败，请手动把 data\.config.yaml 里的 selected_module.ASR 改成 SherpaXASR" }
     }
 }

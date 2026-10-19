@@ -9,6 +9,15 @@ PY="$SERVER/.venv/bin/python"
 
 [[ -x "$PY" ]] || { echo "未找到虚拟环境，请先运行：bash scripts/install.sh" >&2; exit 1; }
 
+# 开着开机自启时服务已经在后台运行，再手动启动会抢同一个端口。
+# 后台服务自己运行本脚本时，status 里的进程号就是本进程（早期版本生成的自启配置里没有 HUB_AUTOSTART）
+if [[ "${HUB_AUTOSTART:-0}" != "1" ]] && status="$(bash "$ROOT/scripts/autostart.sh" status 2>/dev/null)" \
+  && [[ "$status" == *正在运行* && "$status" != *"（进程 $$）"* ]]; then
+  echo "$status" >&2
+  echo "服务已经在后台运行，不用再手动启动。想在终端里看实时输出，先运行 bash \"$ROOT/scripts/autostart.sh\" disable" >&2
+  exit 1
+fi
+
 # 开机自启（autostart.sh）时，启动失败的报错写在这个文件里；反复启动失败时不让它无限变大
 if [[ -n "${AUTOSTART_ERR_LOG:-}" && -f "$AUTOSTART_ERR_LOG" ]] && (( $(wc -c <"$AUTOSTART_ERR_LOG") > 1048576 )); then
   : >"$AUTOSTART_ERR_LOG"

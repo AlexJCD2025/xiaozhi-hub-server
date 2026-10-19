@@ -47,7 +47,7 @@
 
 需要：
 
-- macOS 或 Linux（Windows 脚本还没有实测）；
+- macOS 或 Linux，已安装 git；macOS 上没有 ffmpeg、opus 时，还需要 [Homebrew](https://brew.sh) 来安装它们。Windows 脚本还没有实测，也还没有一键安装、开机自启和更新脚本；
 - 电脑和设备连在同一个局域网；
 - 使用 Claude Code 的话，先安装好，并在终端运行一次 `claude` 登录。
 

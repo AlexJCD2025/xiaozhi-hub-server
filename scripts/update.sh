@@ -10,6 +10,8 @@ set -euo pipefail
 # 拉取完代码后用 exec 换成新版本的本脚本继续后面的步骤
 main() {
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # install.sh 全部步骤做完时写下这个文件；没有它说明上次安装或更新中途失败了
+  INSTALLED="$ROOT/main/xiaozhi-server/data/.install-complete"
   cd "$ROOT"
   if [[ "${1:-}" == "--after-pull" ]]; then after_pull "${2:-}"; return; fi
 
@@ -36,7 +38,10 @@ main() {
   new="$(git rev-parse FETCH_HEAD)"
   if [[ "$old" == "$new" ]]; then
     info "已经是最新版本（$(git log -1 --format='%h，%cd' --date=short)）"
-    info "如果上次更新中途失败了，可以运行 bash \"$ROOT/scripts/install.sh\" 补装"
+    if [[ ! -f "$INSTALLED" ]]; then
+      step "补全安装（上次安装可能没有完成，或者是用早期版本的脚本装的）"
+      bash "$ROOT/scripts/install.sh"
+    fi
     return
   fi
 
@@ -65,12 +70,20 @@ after_pull() {
     # 浅克隆只有最新一次提交，列不出中间的改动，给出 GitHub 上的对比页
     info "已更新到：$(git log -1 --format='%h %s（%cd）' --date=short)"
     local url
-    url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github.com:#https://github.com/#; s#\.git$##')"
+    url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github.com:#https://github.com/#; s#\.git$##' || true)"
     [[ -n "$old" && "$url" == https://github.com/* ]] && info "全部改动：$url/compare/${old:0:12}...$(git rev-parse --short=12 HEAD)"
   fi
 
+  if [[ ! -f "$INSTALLED" ]]; then
+    # 第一次安装就没装完：按完整安装走，包括最后询问是否开机自启
+    step "补全安装（上次安装可能没有完成，或者是用早期版本的脚本装的）"
+    bash "$ROOT/scripts/install.sh" || fail "安装没有完成。按上面的提示处理后，重新运行 bash \"$ROOT/scripts/update.sh\" 即可接着装"
+    return
+  fi
   step "补装依赖和模型"
-  HUB_UPDATING=1 bash "$ROOT/scripts/install.sh" || fail "安装步骤失败。按上面的提示处理后，运行 bash \"$ROOT/scripts/install.sh\" 补装"
+  # 先删掉完成标记：这一步失败时，下次运行 update.sh 会发现并重新补装
+  rm -f "$INSTALLED"
+  HUB_UPDATING=1 bash "$ROOT/scripts/install.sh" || fail "安装步骤失败。按上面的提示处理后，重新运行 bash \"$ROOT/scripts/update.sh\" 即可补装"
 
   if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
     step "重启后台服务"
