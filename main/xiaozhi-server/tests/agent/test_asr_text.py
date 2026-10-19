@@ -45,6 +45,8 @@ def test_call_name_hotwords_use_model_names_not_aliases():
     assert asr_text.call_name_hotwords(cfg) == ["Claude", "DeepSeek", "智谱"]
     assert asr_text.call_name_hotwords({}) == ["Claude"]  # 没配时用默认呼名
     assert asr_text.call_name_hotwords({"call_names": {"enabled": False}}) == []
+    both = {"call_names": {"models": {"ClaudeCLI": ["cloud"], "ClaudeAPI": ["claude api"]}}}
+    assert asr_text.call_name_hotwords(both) == ["Claude"]  # 本机和 API 都叫 Claude，只留一个
 
 
 def test_effective_hotwords_merge_dedupe():

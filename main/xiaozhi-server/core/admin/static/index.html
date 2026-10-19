@@ -801,22 +801,28 @@ async function renderASR(root) {
     <div class="card" style="margin-top:16px" id="cor-card"></div>
     ${recentCard(d.recent)}
     <p class="muted small" style="margin-top:14px">其他语音识别方案暂不支持在后台设置。</p>`;
-  const checks = [bindVad(d.vad), bindHotwords(d.hotwords), bindCorrections(d.corrections)];
-  page.dirty = () => checks.some((f) => f && f());
+  asrChecks = [bindVad(d.vad), bindHotwords(d.hotwords), bindCorrections(d.corrections)];
+  page.dirty = () => asrChecks.some((f) => f && f());
   bindRecent(root);
 }
 
-// 保存一张卡片后重新打开本页，显示服务端整理后的结果（各卡片分别保存）
-const saveAndReload = (target, path, body) => busy(target, async () => {
-  try { const r = await api(path, body); toast(r.note, r.failed); page.dirty = null; await openPage("asr", true); }
-  catch (err) { toast(err.message, true); }
-});
+// 各卡片分别保存；保存后重新打开本页，显示服务端整理后的结果。own 是这张卡片的“有没有修改”检查
+let asrChecks = [];
+const saveAndReload = (target, path, body, own) => {
+  if (asrChecks.some((f) => f && f !== own && f())
+      && !confirm("其他卡片还有没保存的修改，保存这里后页面会刷新，那些修改会丢掉。继续吗？")) return;
+  return busy(target, async () => {
+    try { const r = await api(path, body); toast(r.note, r.failed); page.dirty = null; await openPage("asr", true); }
+    catch (err) { toast(err.message, true); }
+  });
+};
 
 function bindVad(v) {
   if (!v.supported) return null;
   const input = $("vad-silence");
-  $("vad-save").onclick = (e) => saveAndReload(e.target, "vad", { silence_ms: input.value.trim() });
-  return () => input.value.trim() !== String(v.silence_ms);
+  const dirty = () => input.value.trim() !== String(v.silence_ms);
+  $("vad-save").onclick = (e) => saveAndReload(e.target, "vad", { silence_ms: input.value.trim() }, dirty);
+  return dirty;
 }
 
 // ---------- 热词 ----------
@@ -857,9 +863,10 @@ function bindHotwords(h) {
   };
   $("hw-add").onclick = add;
   $("hw-new").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
-  $("hw-save").onclick = (e) => saveAndReload(e.target, "asr/hotwords", { words });
+  const dirty = () => JSON.stringify(words) !== JSON.stringify(h.words) || !!$("hw-new").value.trim();
+  $("hw-save").onclick = (e) => saveAndReload(e.target, "asr/hotwords", { words }, dirty);
   draw();
-  return () => JSON.stringify(words) !== JSON.stringify(h.words) || !!$("hw-new").value.trim();
+  return dirty;
 }
 
 // ---------- 识别后纠错 ----------
@@ -913,10 +920,11 @@ function bindCorrections(list) {
       else items.push({ target, aliases: [alias] });
       draw();
     };
-    $("cor-save").onclick = (e) => saveAndReload(e.target, "asr/corrections", { items });
+    $("cor-save").onclick = (e) => saveAndReload(e.target, "asr/corrections", { items }, dirty);
   };
+  const dirty = () => JSON.stringify(items) !== original || !!($("cor-alias").value.trim() || $("cor-target").value.trim());
   draw();
-  return () => JSON.stringify(items) !== original || !!($("cor-alias").value.trim() || $("cor-target").value.trim());
+  return dirty;
 }
 
 // ---------- 最近识别 ----------
