@@ -445,3 +445,20 @@ def pytest_collection_modifyitems(config, items):
         return
     # Mock 模式下不强行 skip：测试应该都能跑（用 shim）。
     return
+
+
+# [xiaozhi-hub] 测试期间不往控制台打 loguru 日志，只写 pytest.log。
+# claude_cli 等模块在后台线程里打日志；pytest 在每个测试阶段之间会截取并清空捕获的输出，
+# 机器负载高时，一条日志刚好在这时被截断在一个汉字中间，pytest 共用的解码器从此出错，
+# 之后所有测试都报 UnicodeDecodeError（表现为"1 failed, 99 passed, 215 errors"）。没有测试检查控制台日志。
+@pytest.fixture(autouse=True, scope="session")
+def _hub_no_console_log():
+    from loguru import logger
+
+    from config.logger import setup_logging
+
+    setup_logging()  # 确保已初始化，之后不会再加回控制台输出
+    for handler_id, handler in list(logger._core.handlers.items()):
+        if type(getattr(handler, "_sink", None)).__name__ == "StreamSink":
+            logger.remove(handler_id)
+    yield

@@ -292,6 +292,33 @@ class FakeAgent:
         self.alive = False
 
 
+def stop_provider(p) -> None:
+    """测试结束时彻底停掉 provider 的后台线程：取消循环里还没跑完的任务（例如模拟卡死、还在 sleep 的一轮），
+    停止循环，并等线程退出。
+
+    只发一个 stop 不等的话，上一个测试留下的任务会继续在后台打日志，写进下一个测试的输出捕获里。
+    机器负载高时，日志刚好在 pytest 截取输出的瞬间被截断在一个汉字中间，pytest 共用的解码器从此出错，
+    后面所有测试都报 UnicodeDecodeError（一个失败带出两百多个 error）。
+    """
+    if p._loop.is_closed():  # 退役测试里循环已经自己停了
+        p._thread.join(timeout=5)
+        return
+
+    async def cancel_all():
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        asyncio.run_coroutine_threadsafe(cancel_all(), p._loop).result(timeout=5)
+    except Exception:
+        pass
+    p._loop.call_soon_threadsafe(p._loop.stop)
+    p._thread.join(timeout=5)
+    assert not p._thread.is_alive(), "provider 的后台线程没有退出"
+
+
 @pytest.fixture
 def provider(tmp_path, monkeypatch):
     FakeAgent.instances, FakeAgent.script, FakeAgent.start_error, FakeAgent.delay = [], [], None, 0.0
@@ -300,8 +327,7 @@ def provider(tmp_path, monkeypatch):
                                   "filler_delay_seconds": 0.3, "turn_timeout_seconds": 2})
     p.store = SessionStore(tmp_path / "sessions.json", "claude_cli")
     yield p
-    if not p._loop.is_closed():  # 退役测试里循环已经自己停了
-        p._loop.call_soon_threadsafe(p._loop.stop)
+    stop_provider(p)
 
 
 def conn(sid="conn-1", device="dev-1", intent="nointent"):
@@ -317,7 +343,7 @@ def test_effort_defaults_to_low(provider, tmp_path):
     assert provider.session_config.effort == "low"
     p = provider_mod.LLMProvider({"cli_path": str(tmp_path / "x"), "workdir": str(tmp_path / "w"), "effort": ""})
     assert p.session_config.effort is None  # 留空表示用 Claude Code 默认值
-    p._loop.call_soon_threadsafe(p._loop.stop)
+    stop_provider(p)
 
 
 def test_provider_reuses_one_process_across_turns(provider):
@@ -591,7 +617,7 @@ def test_progress_gap_grows_and_elapsed_text(provider, tmp_path):
     assert [provider_mod.elapsed_text(s) for s in (12, 60, 95, 185, 599)] == ["12 秒", "1 分钟", "1 分半", "3 分钟", "9 分半"]
     p = provider_mod.LLMProvider({"cli_path": str(tmp_path / "x"), "workdir": str(tmp_path / "w"), "progress_reply": "稍等哈"})
     assert p.progress_reply == "稍等哈。" and p.progress_prefix == "稍等哈"  # 自定义了提示语，第二次起用它开头
-    p._loop.call_soon_threadsafe(p._loop.stop)
+    stop_provider(p)
 
 
 def test_progress_not_inserted_mid_sentence(provider):
@@ -700,7 +726,7 @@ def test_zero_values_are_respected(tmp_path):
         assert p.resume_window == 0 and p.filler_delay == 0
         assert p.stall_timeout == float("inf") and p.turn_timeout == float("inf")  # 0 表示不限制
     finally:
-        p._loop.call_soon_threadsafe(p._loop.stop)
+        stop_provider(p)
 
 
 def test_resume_window_zero_disables_auto_resume(provider):
