@@ -998,7 +998,6 @@ async function renderCallNames(root) {
           <div style="display:flex;gap:8px;margin-top:12px;max-width:440px">
             <input class="in" data-new placeholder="手动添加一种写法"><button class="btn sm" data-add>添加</button></div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-            ${m.suggest.length ? `<button class="btn sm" data-reset>恢复建议写法</button>` : ""}
             <button class="btn sm" data-remove>不再呼叫这个模型</button></div>
           <div data-learnbox>${learnHtml(m)}</div>
         </div>
@@ -1010,9 +1009,6 @@ async function renderCallNames(root) {
       card.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { m.aliases.splice(+b.dataset.del, 1); draw(); }));
       q("[data-add]").onclick = () => { addAlias(m, q("[data-new]").value); draw(); };
       q("[data-new]").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); q("[data-add]").click(); } };
-      if (q("[data-reset]")) q("[data-reset]").onclick = () => {
-        m.aliases = []; m.suggest.filter((a) => !allAliases().includes(a)).forEach((a) => addAlias(m, a)); draw();
-      };
       q("[data-remove]").onclick = () => { models = models.filter((x) => x !== m); draw(); };
       if (q("[data-learn]")) q("[data-learn]").onclick = (e) => busy(e.target, async () => {
         try {
@@ -1036,9 +1032,9 @@ async function renderCallNames(root) {
       : `<p class="muted small" style="margin:0">已配置好的模型都加上了。要加别的厂商，先到“大模型”页填好接口地址、模型和 API Key。</p>`;
     if ($("cn-add-model")) $("cn-add-model").onclick = () => {
       const t = d.targets.find((x) => x.entry === $("cn-pick").value);
-      const m = { entry: t.entry, label: t.label, aliases: [], ready: true, suggest: t.suggest };
+      const m = { entry: t.entry, label: t.label, aliases: [], ready: true };
       models.push(m);
-      t.suggest.filter((a) => !allAliases().includes(a)).forEach((a) => addAlias(m, a));  // 已被别的模型占用的建议写法跳过
+      t.defaults.filter((a) => !allAliases().includes(a)).forEach((a) => addAlias(m, a));  // 已被别的模型占用的跳过
       draw();
     };
   };

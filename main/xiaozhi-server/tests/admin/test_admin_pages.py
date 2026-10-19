@@ -338,7 +338,18 @@ def test_describe_call_names_legacy_key_and_targets(cfg_path):
     _configure_deepseek(cfg_path)
     d = pages.describe_call_names(merged(cfg_path))
     assert [(m["entry"], m["aliases"]) for m in d["models"]] == [("ClaudeCLI", ["cloud"])]
-    assert {t["entry"]: t["suggest"] for t in d["targets"]}["DeepSeekLLM"] == ["deepseek"]
+    defaults = {t["entry"]: t["defaults"] for t in d["targets"]}
+    assert defaults["DeepSeekLLM"] == ["deepseek"]
+    assert defaults["ClaudeCLI"] == ["claude", "cloud", "clod", "clot", "克劳德"]
+
+
+def test_call_targets_defaults_use_english_vendor_id(cfg_path):
+    for vid in ("qwen", "claude"):
+        pages.save_vendor(vid, {"base_url": "https://example.com", "api_key": "sk-1234567890abcdef",
+                                "model": "m"}, merged(cfg_path), cfg_path)
+    defaults = {t["entry"]: t["defaults"] for t in pages.call_targets(merged(cfg_path))}
+    assert defaults["AliLLM"] == ["qwen"]  # 中文名“通义千问”也只填英文
+    assert defaults["ClaudeAPI"] == []  # claude 已给本机 Claude Code
 
 
 def test_save_call_names_validates_and_writes(cfg_path):

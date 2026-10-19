@@ -466,18 +466,20 @@ ALIAS_BAD = re.compile(r"[\s,，.。!！?？、~～;；:：\"'“”‘’]")
 
 
 def call_targets(merged: dict) -> list:
-    """可以配称呼的模型：本机 Claude Code，以及已经填好的 API 厂商。"""
+    """可以配称呼的模型：本机 Claude Code，以及已经填好的 API 厂商。
+
+    defaults 是添加这个模型时预填的称呼：本机 Claude Code 用真人录音实测的几种写法，
+    API 厂商只填英文厂商名；Claude API 的 claude 已给本机，自定义没有固定名字，都不预填。"""
     from core.agent import call_names
 
     result = []
     if config_store.entry_type(merged, "LLM", CLAUDE_CLI_ENTRY) == "claude_cli":
         result.append({"entry": CLAUDE_CLI_ENTRY, "label": "Claude（本机 Claude Code）",
-                       "suggest": list(call_names.DEFAULT_MODELS[CLAUDE_CLI_ENTRY])})
+                       "defaults": list(call_names.DEFAULT_MODELS[CLAUDE_CLI_ENTRY])})
     for vendor in catalog.LLM_VENDORS:
         if describe_vendor(vendor, merged)["configured"]:
-            label = vendor["label"].lower()
             result.append({"entry": vendor["entry"], "label": f"{vendor['label']}（API）",
-                           "suggest": [label] if not ALIAS_BAD.search(label) and len(label) >= 2 else []})
+                           "defaults": [] if vendor["id"] in ("claude", "custom") else [vendor["id"]]})
     return result
 
 
@@ -494,7 +496,7 @@ def describe_call_names(merged: dict) -> dict:
             continue
         t = targets.get(entry)
         models.append({"entry": entry, "label": t["label"] if t else entry, "aliases": call_names._aliases(value),
-                       "ready": t is not None, "suggest": t["suggest"] if t else []})
+                       "ready": t is not None})
     return {
         "enabled": bool(cfg.get("enabled", True)),
         "reply": str(cfg.get("reply") or call_names.DEFAULT_REPLY),
