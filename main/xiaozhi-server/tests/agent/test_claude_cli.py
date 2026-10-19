@@ -576,12 +576,22 @@ def test_long_turn_keeps_connection_alive(provider):
 def test_progress_reply_when_silent_too_long(provider):
     provider.filler, provider.stall_timeout, provider.turn_timeout = "好的我看一下。", 5, 5
     provider.filler_delay, provider.progress_interval = 0.1, 0.5
-    FakeAgent.script = [[1.8, TextDelta("🙂做完了"), Done()]]
+    FakeAgent.script = [[2.0, TextDelta("🙂做完了"), Done()]]
     c = conn()
     provider.on_conn_open(c)
     out = run(provider, c, "干个活")
     assert out.startswith("😶好的我看一下。") and out.endswith("🙂做完了")
-    assert out.count(provider.progress_reply) >= 2  # 填充语之后，每 0.5 秒没开口说一次
+    # 第一次说默认的提示语，第二次起报已用时间；间隔逐次翻倍（0.5 → 1 秒），2 秒内只说两次
+    assert out.count(provider.progress_reply) == 1 and out.count("还在处理，已经 1 秒了。") == 1
+
+
+def test_progress_gap_grows_and_elapsed_text(provider, tmp_path):
+    provider.progress_interval = 30
+    assert [provider._progress_gap(n) for n in range(5)] == [30, 60, 120, 120, 120]
+    assert [provider_mod.elapsed_text(s) for s in (12, 60, 95, 185, 599)] == ["12 秒", "1 分钟", "1 分半", "3 分钟", "9 分半"]
+    p = provider_mod.LLMProvider({"cli_path": str(tmp_path / "x"), "workdir": str(tmp_path / "w"), "progress_reply": "稍等哈"})
+    assert p.progress_reply == "稍等哈。" and p.progress_prefix == "稍等哈"  # 自定义了提示语，第二次起用它开头
+    p._loop.call_soon_threadsafe(p._loop.stop)
 
 
 def test_progress_not_inserted_mid_sentence(provider):

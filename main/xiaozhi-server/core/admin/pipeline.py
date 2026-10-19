@@ -271,7 +271,9 @@ def describe_timeline(merged: dict, calls: dict) -> list:
     if cli_names:
         progress = cli.get("progress_interval_seconds", 30)
         during.append(f"Claude 干长任务时设备陪着等，最长 {_duration(cli.get('turn_timeout_seconds', 600))}，期间连接不会断开"
-                      + (f"；每 {_duration(progress)}没开口就说一句“{cli.get('progress_reply') or '还在处理，请稍等'}”" if progress else ""))
+                      + (f"；{_duration(progress)}没开口就说“{cli.get('progress_reply') or '还在处理，请稍等'}”，"
+                         f"之后报已用时间，间隔逐渐拉长到 {_duration(float(progress) * 4)}" if progress else "")
+                      + "；这段时间设备不收音，想说话先点屏幕打断")
     if calls["enabled"]:
         during.append("说“嗨 + 别的称呼”随时换模型；每个模型只记得跟自己的对话，切回来接着原来的聊")
     during.append("打断：设备说话时点一下屏幕上的脸，或说唤醒词")
@@ -297,7 +299,7 @@ def _llm_params(llm: dict, is_cli: bool) -> list:
             {"label": "允许的工具", "value": "、".join(llm.get("allowed_tools") or []) or "无"},
             {"label": "超时", "value": f"单轮最长 {llm.get('turn_timeout_seconds', 600)} 秒；连续 {llm.get('stall_timeout_seconds', 30)} 秒没有任何动静就中断（执行工具时不算）"},
             {"label": "长任务", "value": "干活期间连接不会因为没人说话断开" + (
-                f"；每 {llm.get('progress_interval_seconds', 30)} 秒没开口就说一句“{llm.get('progress_reply') or '还在处理，请稍等'}”"
+                f"；{llm.get('progress_interval_seconds', 30)} 秒没开口就说“{llm.get('progress_reply') or '还在处理，请稍等'}”，之后报已用时间，间隔逐渐拉长"
                 if llm.get("progress_interval_seconds", 30) else "")},
             {"label": "回复", "value": "边生成边往下传（流式），不用等整段写完"},
         ]

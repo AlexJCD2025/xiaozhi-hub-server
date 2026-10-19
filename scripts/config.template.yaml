@@ -35,7 +35,7 @@ LLM:
     resume_keywords: [接着上次聊, 继续上次的话题, 继续刚才的话题, 接着刚才聊]
     first_reply_filler: 好的，我看一下
     filler_delay_seconds: 2
-    progress_interval_seconds: 30   # 干活时这么久没开口，就说一句进度；填 0 关闭
+    progress_interval_seconds: 30   # 干活时这么久没开口就提示进度，之后间隔逐渐拉长到 4 倍并报已用时间；填 0 关闭
     progress_reply: 还在处理，请稍等
 
   # Claude API（OpenAI 兼容接口），在管理后台填写 API Key 后可切换使用
