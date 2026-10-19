@@ -6,8 +6,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from claude_agent_sdk import (AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolResultBlock, ToolUseBlock,
-                              UserMessage)
+from claude_agent_sdk import (AssistantMessage, RateLimitEvent, ResultMessage, StreamEvent, SystemMessage, TextBlock,
+                              ToolResultBlock, ToolUseBlock, UserMessage)
 
 from core.agent import claude_session as cs_mod
 from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
@@ -98,6 +98,18 @@ async def test_synthetic_error_message_not_spoken():
     assert not [e for e in evs if isinstance(e, TextDelta)]
     errors = [e for e in evs if isinstance(e, Error)]
     assert errors and errors[0].kind == ErrorKind.RATE_LIMIT
+
+
+async def test_no_activity_before_auth_error():
+    """没登录时 Claude 根本没开始干活：初始化消息、限流信息和伪装成 assistant 的错误消息都不算 Activity，
+    否则上层会以为这一轮已经开始，把新会话 ID 记下来，覆盖之前能接续的会话。"""
+    s = session_with([SystemMessage("init", {"model": "claude-haiku"}),
+                      RateLimitEvent(rate_limit_info=None, uuid="u", session_id="s"),
+                      assistant(TextBlock("Not logged in"), model="<synthetic>", error="authentication_failed"),
+                      result(is_error=True)])
+    evs = await collect(s)
+    assert not [e for e in evs if type(e).__name__ == "Activity"]
+    assert [e.kind for e in evs if isinstance(e, Error)][0] == ErrorKind.AUTH
 
 
 async def test_interrupted_result_is_done_not_error():
@@ -685,6 +697,19 @@ def test_session_not_recorded_when_first_event_is_error(provider):
     provider.on_conn_open(c)
     run(provider, c, "你好")
     assert provider.store.get("dev-1")["session_id"] == "old-session"
+
+
+def test_expired_session_not_overwritten_when_new_session_fails(provider):
+    """旧会话已超过自动接续窗口（说"接着上次聊"仍能接回）时，新会话第一轮就鉴权出错，不能用新会话 ID 覆盖它。
+    出错后还会收到收尾的 Done，它也不算 Claude 开始处理。"""
+    old = time.time() - 10 * 3600
+    provider.store.touch("dev-1", "old-session", now=old)
+    FakeAgent.script = [[Error(ErrorKind.AUTH, "not logged in"), Done()]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert FakeAgent.instances[0].resume_id is None  # 确实走的是新开会话
+    assert provider.store.get("dev-1") == {"session_id": "old-session", "last_active": old}
 
 
 def test_abort_and_close_hooks(provider):
