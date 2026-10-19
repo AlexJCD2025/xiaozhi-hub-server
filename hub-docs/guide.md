@@ -17,7 +17,7 @@ bash scripts/start.sh
 
 - uv（Python 包管理工具）、Python 3.10、opus 和 ffmpeg：电脑上已有就直接用，缺少时先询问再安装；
 - Python 依赖：全部装在项目自己的虚拟环境 `main/xiaozhi-server/.venv` 里，约 550MB，不影响系统里的 Python；
-- 语音识别模型：SenseVoice（sherpa-onnx int8 版），约 240MB；
+- 语音识别模型：X-ASR 中英混合模型（sherpa-onnx int8 版），约 175MB，从 Hugging Face 下载；国内下载慢时先设置 `HF_ENDPOINT=https://hf-mirror.com` 再运行安装脚本；
 - 配置文件 `main/xiaozhi-server/data/.config.yaml`：检测到本机已安装 Claude Code 时，默认使用 Claude Code 作为大模型；否则使用智谱 glm-4-flash，需要到管理后台填写 API Key。
 
 安装结束和每次启动时都会运行自检，并显示 OTA 地址和管理后台地址。运行内存约 0.9GB。
@@ -109,7 +109,9 @@ StackChan 的几点说明：
 
 - **原项目**：基于 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 改造，MIT License，Copyright (c) 2025 xinnan-tech。
 - **设备端协议与固件**：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)。
-- **语音识别模型 SenseVoiceSmall**：来自 [FunAudioLLM/SenseVoice](https://github.com/FunAudioLLM/SenseVoice)（阿里巴巴通义实验室），按 [FunASR 模型开源许可协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) 使用。使用的 int8 版由 [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 转换（Apache-2.0），从 ModelScope 的 `pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue` 下载。模型由安装脚本下载，本仓库不包含模型权重。
+- **语音识别模型 X-ASR**（默认）：来自 [Gilgamesh-J/X-ASR](https://github.com/Gilgamesh-J/X-ASR)，Apache-2.0。使用的 int8 版由 [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 转换（Apache-2.0），从 Hugging Face 的 `csukuangfj2/sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03` 下载。
+- **语音识别模型 SenseVoiceSmall**（可选）：来自 [FunAudioLLM/SenseVoice](https://github.com/FunAudioLLM/SenseVoice)（阿里巴巴通义实验室），按 [FunASR 模型开源许可协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) 使用。int8 版由 sherpa-onnx 转换，从 ModelScope 的 `pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue` 下载；只在把语音识别切换为 SherpaASR 时才会下载。
+- 模型都由安装脚本或程序下载，本仓库不包含模型权重。
 - **语音活动检测 silero-vad**：[snakers4/silero-vad](https://github.com/snakers4/silero-vad)，MIT License。
 - **Claude Code 接入**：使用 Anthropic 的 [claude-agent-sdk](https://pypi.org/project/claude-agent-sdk/)。需要用户自行安装 Claude Code 并登录。
 - **测试页里的 Live2D 核心库**：`main/digital-human/js/live2d/live2dcubismcore.min.js`，属于 Live2D Inc. 的专有许可，随原项目一起提供，本项目没有修改。
