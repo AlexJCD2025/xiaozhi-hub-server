@@ -69,6 +69,9 @@ class AdminHandler:
                 web.get("/admin/api/pipeline", self.handle_pipeline),
                 web.get("/admin/api/asr", self.handle_asr),
                 web.post("/admin/api/vad", self.handle_vad_save),
+                web.post("/admin/api/asr/use", self.handle_asr_use),
+                web.post("/admin/api/asr/doubao", self.handle_doubao_save),
+                web.post("/admin/api/asr/doubao/test", self.handle_doubao_test),
                 web.post("/admin/api/asr/hotwords", self.handle_hotwords_save),
                 web.post("/admin/api/asr/corrections", self.handle_corrections_save),
                 web.get("/admin/api/tts", self.handle_tts),
@@ -477,8 +480,59 @@ class AdminHandler:
         return self._json({"ok": True, **await self._blocking(pages.describe_asr, merged),
                            "running": self._running("ASR")})
 
+    async def handle_asr_use(self, request: web.Request):
+        """切换到本地 X-ASR 或豆包。"""
+        self._require_login(request)
+        body = await self._read_json(request)
+        choice = str(body.get("choice") or "")
+        merged = await self._blocking(self._merged)
+        d = await self._blocking(pages.describe_asr, merged)
+        if choice == "local":
+            name = catalog.LOCAL_ASR_ENTRY
+            if not d["local"]["exists"]:
+                return self._error(f"配置里没有 {name} 条目，请重新运行安装脚本生成配置", 404)
+            if not (d["local"]["model"] or {}).get("ok"):
+                return self._error(f"X-ASR 模型文件不完整（{(d['local']['model'] or {}).get('detail', '')}），"
+                                   "请重新运行安装脚本下载", 400)
+        elif choice == "doubao":
+            name = catalog.DOUBAO_ASR_ENTRY
+            if not d["doubao"]["configured"]:
+                return self._error("豆包还没配置好，请先填写 API Key（或 APP ID 和 Access Token）并保存", 400)
+        else:
+            return self._error("只能选本地 X-ASR 或豆包", 400)
+        try:
+            result = await self._switch("ASR", name)
+        except KeyError:
+            return self._error(f"配置里没有 {name}", 404)
+        return self._json(result) if result["ok"] else self._error(result["note"], 400)
+
+    async def handle_doubao_save(self, request: web.Request):
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(pages.save_doubao, body, merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        self.logger.bind(tag=TAG).info(f"管理后台更新了豆包语音识别设置: {', '.join(changed) or '无变化'}")
+        return self._json({"ok": True, "changed": changed,
+                           **await self._apply_if_selected("ASR", catalog.DOUBAO_ASR_ENTRY, changed)})
+
+    async def handle_doubao_test(self, request: web.Request):
+        self._require_login(request)
+        from core.providers.asr.doubao_stream import check_connection
+
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            config = pages.doubao_test_config(body, merged)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        result = await check_connection(config)
+        return self._json(result) if result["ok"] else self._error(result["error"], 400)
+
     async def handle_hotwords_save(self, request: web.Request):
-        """保存热词后重新加载语音识别（X-ASR 约 1 秒）：新连接马上用上，在线设备重连后生效。"""
+        """保存热词后重新加载语音识别（X-ASR 约 1 秒，豆包马上）：新连接马上用上，在线设备重连后生效。"""
         self._require_login(request)
         body = await self._read_json(request)
         try:
@@ -489,6 +543,8 @@ class AdminHandler:
         if not changed:
             return self._json({"ok": True, "changed": [], "note": "没有修改"})
         self.logger.bind(tag=TAG).info("管理后台更新了热词")
+        # 热词在配置顶层，先放进运行中的配置，重新加载语音识别时才用得上
+        self._push_config("asr_hotwords", (await self._blocking(self._merged)).get("asr_hotwords") or [])
         name = merged["selected_module"]["ASR"]
         result = await self._apply_if_selected("ASR", name, changed)
         if result.get("failed"):

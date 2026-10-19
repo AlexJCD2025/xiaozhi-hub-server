@@ -409,32 +409,7 @@ ASR:
     output_dir: tmp/
     model_type: transducer
     num_threads: 2
-    # 热词：容易认错的专有名词，识别时优先考虑（修改后重启服务生效）。写原本的大小写
-    hotwords:
-    - Claude
-    - Claude Code
-    - Sonnet
-    - Opus
-    - Haiku
-    - Fable
-    - Codex
-    - GitHub
-    - StackChan
-    - Python
-    - Docker
-    - VS Code
-    - Markdown
-    - README
-    - JSON
-    - API
-    - npm
-    - commit
-    - push
-    - pull request
-    - issue
-    - PR
-    - bug
-    - debug
+    # 热词在后台“语音识别”页维护，所有支持热词的识别共用（配置顶层的 asr_hotwords，默认列表见 core/agent/asr_text.py）
   DoubaoASR:
     # 可以在这里申请相关Key等信息
     # https://console.volcengine.com/speech/app
@@ -477,6 +452,8 @@ ASR:
     type: doubao_stream
     appid: 你的火山引擎语音合成服务appid
     access_token: 你的火山引擎语音合成服务access_token
+    # [xiaozhi-hub] 新版火山引擎控制台只给一个 API Key：填了它就不用 appid 和 access_token。后台“语音识别”页可以填写
+    api_key: 你的火山引擎新版控制台API Key
     # 资源ID：小时版 volc.seedasr.sauc.duration，并发版 volc.seedasr.sauc.concurrent
     resource_id: volc.seedasr.sauc.duration
     # 热词、替换词使用流程：https://www.volcengine.com/docs/6561/155738

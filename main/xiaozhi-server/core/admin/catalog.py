@@ -1,4 +1,4 @@
-"""管理后台用到的固定清单：大模型厂商预设、EdgeTTS 中文音色、插件说明、Claude CLI 选项。"""
+"""管理后台用到的固定清单：大模型厂商预设、语音识别选项、EdgeTTS 中文音色、插件说明、Claude CLI 选项。"""
 
 # ---------- 大模型：API 厂商（统一走 OpenAI 兼容协议） ----------
 # entry：保存到配置里的条目名。已有的上游条目直接复用（保留用户填过的 Key），其余是新条目。
@@ -73,6 +73,18 @@ CLAUDE_TOOLS = [
     {"name": "Edit", "label": "改文件", "risky": True},
     {"name": "TodoWrite", "label": "记待办", "risky": False},
 ]
+
+# ---------- 语音识别：后台可以选的两种 ----------
+# 本地只开放默认的 X-ASR（安装脚本已下载）；其他本地模型选中时会自动下载，不放进后台
+LOCAL_ASR_ENTRY = "SherpaXASR"
+DOUBAO_ASR_ENTRY = "DoubaoStreamASRV2"
+DOUBAO_RESOURCES = [
+    {"value": "volc.seedasr.sauc.duration", "label": "2.0 小时版", "hint": "按使用时长计费"},
+    {"value": "volc.seedasr.sauc.concurrent", "label": "2.0 并发版", "hint": "按并发路数计费"},
+    {"value": "volc.bigasr.sauc.duration", "label": "1.0 小时版", "hint": "上一代模型"},
+    {"value": "volc.bigasr.sauc.concurrent", "label": "1.0 并发版", "hint": "上一代模型"},
+]
+DOUBAO_RESOURCE_VALUES = {r["value"] for r in DOUBAO_RESOURCES}
 
 # ---------- 语音合成：EdgeTTS 中文音色 ----------
 EDGE_VOICES = [

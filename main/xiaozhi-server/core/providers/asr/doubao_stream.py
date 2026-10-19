@@ -6,6 +6,7 @@ import websockets
 from core.providers.asr.base import ASRProviderBase
 from config.logger import setup_logging
 from core.providers.asr.dto.dto import InterfaceType
+from core.agent import asr_text  # [xiaozhi-hub]
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,6 +14,16 @@ if TYPE_CHECKING:
 
 TAG = __name__
 logger = setup_logging()
+
+
+def _filled(value) -> str:
+    """[xiaozhi-hub] 配置里"你的…""（选填）…"这类占位文本当作没填，不发给豆包。"""
+    text = "" if value is None else str(value).strip()
+    return "" if not text or "你" in text or text.startswith("（选填）") else text
+
+
+def _mask(value: str) -> str:
+    return f"{value[:4]}…" if value else ""
 
 
 class ASRProvider(ASRProviderBase):
@@ -27,13 +38,15 @@ class ASRProvider(ASRProviderBase):
         self._is_stopping = False  # 添加停止标志，防止竞态条件
 
         # 配置参数
-        self.appid = str(config.get("appid"))
-        self.access_token = config.get("access_token")
+        # [xiaozhi-hub] 新版控制台只有一个 API Key（X-Api-Key）；旧版控制台用 appid + access_token
+        self.api_key = _filled(config.get("api_key"))
+        self.appid = _filled(config.get("appid"))
+        self.access_token = _filled(config.get("access_token"))
         # 资源ID，用于区分不同的ASR模型（默认1.0模型小时版，v2版本使用seed-asr）
         self.resource_id = config.get("resource_id", "volc.bigasr.sauc.duration")
 
-        self.boosting_table_name = config.get("boosting_table_name", "")
-        self.correct_table_name = config.get("correct_table_name", "")
+        self.boosting_table_name = _filled(config.get("boosting_table_name"))
+        self.correct_table_name = _filled(config.get("correct_table_name"))
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
 
@@ -62,6 +75,11 @@ class ASRProvider(ASRProviderBase):
         self.secret = config.get("secret", "access_secret")
         end_window_size = config.get("end_window_size")
         self.end_window_size = int(end_window_size) if end_window_size else 200
+        # [xiaozhi-hub] 后台维护的热词直接放进请求（热词直传），超出豆包上限的从后面截掉
+        hotwords = [str(w) for w in config.get("hotwords") or []]
+        self.hotwords, dropped = asr_text.doubao_hotwords(hotwords, self.enable_multilingual)
+        if dropped:
+            logger.bind(tag=TAG).warning(f"热词超出豆包上限，没有带上的 {len(dropped)} 个: {', '.join(dropped)}")
 
     async def open_audio_channels(self, conn):
         await super().open_audio_channels(conn)
@@ -76,7 +94,7 @@ class ASRProvider(ASRProviderBase):
                 self.is_processing = True
                 # 建立新的WebSocket连接
                 headers = self.token_auth() if self.auth_method == "token" else None
-                logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {headers}")
+                logger.bind(tag=TAG).info(f"正在连接ASR服务，资源: {self.resource_id}")
 
                 self.asr_ws = await websockets.connect(
                     self.ws_url,
@@ -96,7 +114,7 @@ class ASRProvider(ASRProviderBase):
                     full_client_request.extend((len(payload_bytes)).to_bytes(4, "big"))
                     full_client_request.extend(payload_bytes)
 
-                    logger.bind(tag=TAG).info(f"发送初始化请求: {request_params}")
+                    logger.bind(tag=TAG).info(f"发送初始化请求: {self._loggable(request_params)}")
                     await self.asr_ws.send(full_client_request)
 
                     # 等待初始化响应
@@ -282,11 +300,12 @@ class ASRProvider(ASRProviderBase):
                 logger.bind(tag=TAG).debug(f"发送结束音频帧时出错: {e}")
 
     def construct_request(self, reqid):
+        # [xiaozhi-hub] 没填的热词表名不发；后台维护的热词放在 context 里
+        corpus = {k: v for k, v in (("boosting_table_name", self.boosting_table_name),
+                                    ("correct_table_name", self.correct_table_name)) if v}
+        if self.hotwords:
+            corpus["context"] = json.dumps({"hotwords": [{"word": w} for w in self.hotwords]}, ensure_ascii=False)
         req = {
-            "app": {
-                "appid": self.appid,
-                "token": self.access_token,
-            },
             "user": {"uid": self.uid},
             "request": {
                 "reqid": reqid,
@@ -295,10 +314,7 @@ class ASRProvider(ASRProviderBase):
                 "result_type": self.result_type,
                 "sequence": 1,
                 "end_window_size": self.end_window_size,
-                "corpus": {
-                    "boosting_table_name": self.boosting_table_name,
-                    "correct_table_name": self.correct_table_name,
-                }
+                "corpus": corpus,
             },
             "audio": {
                 "format": self.format,
@@ -310,16 +326,32 @@ class ASRProvider(ASRProviderBase):
             },
         }
 
+        if not self.api_key:  # 旧版控制台
+            req["app"] = {"appid": self.appid, "token": self.access_token}
+
         # language参数仅在多语种模式下添加
         if self.enable_multilingual and self.language:
             req["audio"]["language"] = self.language
 
         logger.bind(tag=TAG).debug(
-            f"构造请求参数: {json.dumps(req, ensure_ascii=False)}"
+            f"构造请求参数: {json.dumps(self._loggable(req), ensure_ascii=False)}"
         )
         return req
 
+    @staticmethod
+    def _loggable(req: dict) -> dict:
+        """[xiaozhi-hub] 写日志用：token 只留前 4 位。"""
+        if "app" not in req:
+            return req
+        return {**req, "app": {**req["app"], "token": _mask(req["app"].get("token") or "")}}
+
     def token_auth(self):
+        if self.api_key:  # [xiaozhi-hub] 新版控制台
+            return {
+                "X-Api-Key": self.api_key,
+                "X-Api-Resource-Id": self.resource_id,
+                "X-Api-Connect-Id": str(uuid.uuid4()),
+            }
         return {
             "X-Api-App-Key": self.appid,
             "X-Api-Access-Key": self.access_token,
@@ -428,3 +460,43 @@ class ASRProvider(ASRProviderBase):
                 pass
             self.forward_task = None
         self.is_processing = False
+
+
+async def check_connection(config: dict, timeout: float = 10) -> dict:
+    """[xiaozhi-hub] 管理后台的"测试连接"：建连、发初始化请求和 0.5 秒静音，收到识别服务的回应就算通过。
+
+    返回 {"ok": True, "seconds": 用时} 或 {"ok": False, "error": 给用户看的原因}。
+    """
+    import time
+
+    provider = ASRProvider({**config, "hotwords": []}, True)
+    started = time.time()
+
+    def packet(header, payload: bytes) -> bytes:
+        data = gzip.compress(payload)
+        return bytes(header + len(data).to_bytes(4, "big") + data)
+
+    try:
+        async with websockets.connect(provider.ws_url, additional_headers=provider.token_auth(),
+                                      open_timeout=timeout, close_timeout=2) as ws:
+            request = json.dumps(provider.construct_request(str(uuid.uuid4()))).encode()
+            await ws.send(packet(provider.generate_header(), request))
+            result = provider.parse_response(await asyncio.wait_for(ws.recv(), timeout))
+            if "code" in result and result["code"] not in (1000, 1013):
+                return {"ok": False, "error": f"识别服务返回错误 {result['code']}：{str(result.get('payload_msg'))[:200]}"}
+            await ws.send(packet(provider.generate_last_audio_default_header(), b"\0" * 16000))
+            result = provider.parse_response(await asyncio.wait_for(ws.recv(), timeout))
+            code = result.get("code") or (result.get("payload_msg") or {}).get("code")
+            if code not in (None, 1000, 1013, 20000000):
+                return {"ok": False, "error": f"识别服务返回错误 {code}：{str(result.get('payload_msg'))[:200]}"}
+    except websockets.InvalidStatus as e:
+        status = e.response.status_code
+        body = (e.response.body or b"").decode("utf-8", "replace")[:200]
+        if status in (401, 403):
+            return {"ok": False, "error": f"鉴权失败（{status}）：Key 不对，或者没有开通这个资源。{body}".strip()}
+        return {"ok": False, "error": f"识别服务拒绝连接（{status}）：{body}".strip()}
+    except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as e:
+        return {"ok": False, "error": f"连不上豆包识别服务，请检查网络：{type(e).__name__} {str(e)[:120]}".strip()}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    return {"ok": True, "seconds": round(time.time() - started, 1)}
