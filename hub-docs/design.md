@@ -28,11 +28,12 @@
 
 ## 1. 三方和两段关系
 
-```
-设备（StackChan）  ⇄  本地服务端（本项目）  ⇄  大模型
-        WebSocket 长连接             API 模型：每句话一次 HTTP 请求
-                                     Claude Code：本机常驻进程，通过进程的输入输出通信
-```
+<picture>
+  <source srcset="images/architecture-dark.svg" media="(prefers-color-scheme: dark)">
+  <img src="images/architecture-light.svg" alt="架构图：小智设备经 WebSocket 长连接连到本机的 xiaozhi-hub-server；服务端依次经过语音识别、热词纠错、呼名、多模型路由，交给 API 模型或 Claude Code 会话，再经语音合成发回设备；状态存在 data/.config.yaml、data/agent_sessions.json 和 Claude Code 自己的 ~/.claude 里">
+</picture>
+
+紫色边框是本项目新增的模块，圆柱是保存状态的地方，哪些重启后还在见 [§11](#11-什么保存什么不保存)。
 
 两段关系的性质完全不同：
 
@@ -44,6 +45,30 @@
 ---
 
 ## 2. 一次对话的完整经过
+
+下图是一个例子：先交给 Claude Code，再叫 DeepSeek 切过去。每一步的细节见下表。
+
+```mermaid
+sequenceDiagram
+    participant D as 设备
+    participant S as 服务端
+    participant C as Claude Code 进程
+    participant A as API 模型
+
+    D->>S: 唤醒，建立连接
+    S-->>D: 缓存的问候
+    D->>S: 第一句话
+    S->>C: 启动进程，接上或新开会话
+    C-->>S: 回复
+    S-->>D: 语音
+    D->>S: "嗨 DeepSeek，……"
+    S->>A: 整段对话 + 这句话
+    A-->>S: 回复
+    S-->>D: 语音
+    Note over D,S: 没人说话、退出指令、断网
+    S--)D: 断开连接
+    S->>C: 关闭进程，会话留在硬盘
+```
 
 | 步骤 | 谁在做 | 发生什么 |
 | --- | --- | --- |
