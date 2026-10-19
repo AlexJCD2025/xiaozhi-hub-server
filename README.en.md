@@ -25,35 +25,33 @@
 
 ---
 
-A **local hub server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the server runs on your own computer and hands your speech to the local Claude Code, or to the LLM of your choice, to think and act.
+A **local server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the server runs on your own computer and hands what you say to the local Claude Code, or to the LLM of your choice.
+
+```
+Xiaozhi device   ⇄   xiaozhi-hub-server on your computer   ⇄   Claude Code / DeepSeek / Qwen / …
+listens, speaks      recognizes, routes, synthesizes            thinks and does the work
+```
 
 > A community project compatible with the Xiaozhi protocol. Not an official Xiaozhi project.
 
-> Want to know **why things work the way they do**—what happens from wake word to disconnect, when the device connection drops, when the Claude Code process starts and stops, what is written to disk, and why API models cannot resume a conversation? See the [design notes](hub-docs/design.md) (Chinese).
+## What it does
 
-## Features
-
-- **Voice access to your local Claude Code**: talk to the Claude Code you are already signed in to, and let it read files in its working directory and carry out tasks.
-  - One long-running process per device, so replies come fast.
-  - Interrupt the device while it speaks (on StackChan, tap the face on the screen or say the wake word), then keep talking.
-  - Conversation resume: picks up automatically after a reconnect, and you can say "接着上次聊" ("continue where we left off") to resume an earlier conversation. → [design.md §6](hub-docs/design.md#6-会话接续只对-claude-code)
-- **Other LLMs too**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
-- **Switch models by name**: after waking the device, say "嗨 + a name" (e.g. "Hey Claude", "Hey DeepSeek") to hand the conversation to that model. Each device remembers the model it used last, and each model only remembers its own conversations. Names can be recorded in the admin console by speaking to the device, so they match your pronunciation. → [design.md §5](hub-docs/design.md#5-呼名与多模型路由)
-- **Local speech recognition**: the X-ASR Chinese-English model runs on your machine, no internet needed, and handles mixed sentences like "帮我跑一下 npm install". Speech synthesis uses EdgeTTS with a choice of voices.
-- **Web admin console**:
-  - Set up LLMs and API keys; choose the model, thinking level and permission level for Claude Code.
-  - Give each model a name to call it by: add it by hand, or say it to the device a few times to record it.
-  - Speech recognition: switch between local X-ASR and Doubao streaming ASR (just paste the API Key and test the connection); set how long a pause ends a sentence, hotwords (shared by both), and post-recognition corrections (e.g. turn "cloud code" into "Claude Code"); review recent transcripts and add misheard words to the hotwords or corrections in one click.
-  - Pick and preview a TTS voice, configure intent recognition.
-  - See environment checks and online devices, and send test expressions to a device.
-  - A "How it works" page shows the full path of one sentence from the device to playback, and the prompt sent to the LLM.
-- **One-command install, autostart and update**: a single command on macOS / Linux sets up Python, dependencies and the speech recognition model; optionally starts at login, and one command updates to the latest version.
+- **Direct Claude Code by voice**: for example "list the files in my working directory" or "turn this week's notes into a checklist". It works with the account you signed in to on this computer; for tasks that take a few minutes, the device waits with you and reports the result when it's done.
+- **Switch between LLMs**: say "嗨 Claude" or "嗨 DeepSeek" ("Hey Claude" / "Hey DeepSeek") to hand the conversation to that model. Each device remembers the one it used last. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
+- **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
+- **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
+- **Mixed Chinese and English**: the default X-ASR speech recognition runs on your machine without internet and gets sentences like "帮我跑一下 npm install" right; Doubao streaming ASR is also available.
+- **Web admin console**: set up LLMs and API keys, Claude Code's model and permissions, the names you call models by, hotwords and corrections for speech recognition, and the TTS voice; see online devices and environment checks.
 
 ## Quick start
 
-Requirements: macOS or Linux (the Windows script has not been tested), with the computer and the device on the same LAN. To use Claude Code, install it first and run `claude` once in a terminal to sign in.
+Requirements:
 
-Run this line in a terminal. It downloads the code to `~/xiaozhi-hub-server` and installs it, and at the end asks whether to start the server automatically at login:
+- macOS or Linux (the Windows scripts have not been tested yet);
+- the computer and the device on the same LAN;
+- to use Claude Code, install it first and run `claude` once in a terminal to sign in.
+
+Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
@@ -70,34 +68,29 @@ bash scripts/start.sh     # start (if autostart is not enabled)
 
 To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh` (use your own directory if you cloned manually).
 
-After it starts, the terminal shows two addresses:
+Once the server is running, you need two addresses:
 
-- **Admin console**: open `http://127.0.0.1:16688/admin` in a browser on this computer and set an admin password on first use.
-- **OTA address**: `http://<your computer's LAN IP>:16688/xiaozhi/ota/`, entered when setting up the device's network.
+| | Address | Use |
+| --- | --- | --- |
+| Admin console | `http://127.0.0.1:16688/admin` | Open it in a browser on this computer; set an admin password on first use |
+| OTA address | `http://<your computer's LAN IP>:16688/xiaozhi/ota/` | Enter it under "Advanced options" when setting up the device's network |
 
-## Connecting a device
+For StackChan setup steps, how to talk to the device, and the FAQ, see the **[user guide](hub-docs/guide.md)** (Chinese).
 
-When setting up the device's network, enter the OTA address above under "Advanced options" on the setup page. For StackChan step by step, FAQ and more settings, see the **[user guide](hub-docs/guide.md)** (Chinese).
+## Documentation
+
+- [User guide](hub-docs/guide.md) (Chinese): installation, device setup, how to talk to it, FAQ.
+- [Design notes](hub-docs/design.md) (Chinese): what happens from wake word to disconnect, when the connection and the Claude Code process start and stop, what is saved, and why it is designed this way.
+- The "How it works" page in the admin console: based on your current settings, what each step uses and what happens when you say what.
 
 ## Security
 
 - Use the server only on your LAN. Do not expose it to the internet.
-- By default Claude Code can only access the working directory `~/xiaozhi-workspace`, with read-only tools. Once you allow writing files or running commands, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
+- By default Claude Code can only read files in the working directory `~/xiaozhi-workspace`. Once you allow writing files or running commands in the admin console, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
 
-## Which directories are used
+## Repository layout
 
-This project only runs `main/xiaozhi-server`. When the Xiaozhi firmware changes, the upstream server adapts to it, and this project merges upstream regularly to stay compatible with new firmware. To keep those merges free of conflicts, the rest of the upstream code is kept as is but not used, and you can ignore it:
-
-| Directory / file | Notes |
-| --- | --- |
-| `main/xiaozhi-server` | **Used**: the server itself; all changes in this project live here |
-| `scripts/` | **Used**: this project's install, start, autostart and update scripts |
-| `hub-docs/`, `README.en.md` | **Used**: this project's documents (user guide, design notes, README images) and English README |
-| `main/manager-api`, `main/manager-web`, `main/manager-mobile` | Not used: the upstream management console, replaced by this project's own web admin console |
-| `main/digital-human` | Not used: the upstream digital human front end |
-| `main/README.md`, `main/README_en.md`, `docs/` | Not used: upstream documentation, partly not applicable to this project |
-| `Dockerfile-*`, `docker-setup.sh`, `.dockerignore` | Not used: upstream Docker deployment |
-| `Makefile` | Not used: the upstream test entry point (including Java and front-end tests for the management console) |
+This project only runs `main/xiaozhi-server`, plus `scripts/` (install, start, autostart and update scripts) and `hub-docs/` (documentation). The other directories are unchanged code from the upstream [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (management console, digital human front end, Docker deployment, and so on) and are not used. They are kept so that regular merges from upstream, which keep up with Xiaozhi firmware updates, produce fewer conflicts. The one-line installer downloads only the directories that are used.
 
 ## License
 
