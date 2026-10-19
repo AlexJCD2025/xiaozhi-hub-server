@@ -232,6 +232,7 @@ cat <<EOF
   ${START_HINT}
   首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:${HTTP_PORT}/admin 设置密码。${LLM_HINT}
   以后更新到最新版本：bash "$ROOT/scripts/update.sh"
+  卸载（会一起取消开机自启）：bash "$ROOT/scripts/uninstall.sh"
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。

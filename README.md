@@ -66,7 +66,7 @@ bash scripts/install.sh   # 安装
 bash scripts/start.sh     # 启动（没有开启开机自启时）
 ```
 
-以后更新到最新版本：`bash ~/xiaozhi-hub-server/scripts/update.sh`（手动下载的，换成自己的目录）。
+以后更新到最新版本：`bash ~/xiaozhi-hub-server/scripts/update.sh`；卸载：`bash ~/xiaozhi-hub-server/scripts/uninstall.sh`，会一起取消开机自启（手动下载的，换成自己的目录）。
 
 服务启动后，会用到两个地址：
 

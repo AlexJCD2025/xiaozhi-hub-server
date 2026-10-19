@@ -14,7 +14,7 @@ xiaozhi-hub-server 是小智设备（M5Stack StackChan、ESP32 开发板等）�
 4. [跟设备说话](#4-跟设备说话)
 5. [管理后台](#5-管理后台)
 6. [常见问题](#6-常见问题)
-7. [开机自启与更新](#7-开机自启与更新)
+7. [开机自启、更新与卸载](#7-开机自启更新与卸载)
 8. [安装细节](#8-安装细节)
 
 ---
@@ -27,7 +27,7 @@ xiaozhi-hub-server 是小智设备（M5Stack StackChan、ESP32 开发板等）�
 - 能访问网络；
 - 已安装 git（macOS 没有时运行 `xcode-select --install`）。
 
-**一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`，然后自动安装；安装结束时会询问是否开机自启，直接回车就是开启（见 [§7](#7-开机自启与更新)）。
+**一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`，然后自动安装；安装结束时会询问是否开机自启，直接回车就是开启（见 [§7](#7-开机自启更新与卸载)）。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
@@ -148,7 +148,7 @@ http://<电脑的局域网 IP>:16688/xiaozhi/ota/
 - **自检提示"模块依赖"缺包**：重新运行一次安装脚本补装依赖。
 - **下载模型很慢或失败**：设置 Hugging Face 镜像后重新运行安装脚本，见 [§8](#8-安装细节)；下载支持断点续传。
 
-## 7. 开机自启与更新
+## 7. 开机自启、更新与卸载
 
 ### 开机自启
 
@@ -182,6 +182,22 @@ bash ~/xiaozhi-hub-server/scripts/update.sh
 如果改过仓库里的文件（例如直接改了 `config.yaml`），更新脚本会列出这些文件并停下，不会覆盖。自己的配置请在管理后台修改，或者写在 `data/.config.yaml` 里。
 
 再次运行一键安装命令也可以：检测到已经安装过，会改为运行更新脚本。
+
+### 卸载
+
+```bash
+bash ~/xiaozhi-hub-server/scripts/uninstall.sh
+```
+
+Windows 用 `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`（未实测）。卸载脚本会先列出要删的内容，回答 `y` 才执行：
+
+1. 取消开机自启，停止后台服务（macOS 删掉 LaunchAgent，Linux 删掉 systemd 用户服务）；
+2. 删除整个安装目录，包括虚拟环境、语音识别模型、配置文件和里面的 API Key；
+3. 询问是否删除 Claude Code 的工作目录 `~/xiaozhi-workspace`，默认保留。
+
+- 用 `start.sh` 手动启动的服务还在运行时，卸载脚本会停下，请先按 Ctrl+C 停止服务。
+- 完整 clone 的 git 仓库（不是一键安装下载的）可能有没推送的改动，卸载脚本只取消开机自启，不删目录。
+- uv、Python 3.10、ffmpeg、opus、Claude Code 可能被别的程序共用，不会删除。卸载结束时会列出手动删除的方法，例如 `uv cache clean` 删掉约 500MB 的下载缓存。
 
 ## 8. 安装细节
 
