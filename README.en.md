@@ -34,48 +34,30 @@ listens, speaks      recognizes, routes, synthesizes            thinks and does 
 
 > A community project compatible with the Xiaozhi protocol. Not an official Xiaozhi project.
 
-## What it does
+## Features
 
-- **Direct Claude Code by voice**: for example "list the files in my working directory" or "turn this week's notes into a checklist". It works with the account you signed in to on this computer; for tasks that take a few minutes, the device waits with you and reports the result when it's done.
-- **Switch between LLMs**: say "嗨 Claude" ("Hey Claude") to hand the conversation to the local Claude Code; after giving other models a call name in the admin console, say something like "嗨 DeepSeek" to switch to that model. Each device remembers the one it used last. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
+- **Direct Claude Code by voice**: it works with the account you signed in to on this computer, for example "turn this week's notes into a checklist". For tasks that take a few minutes, the device waits with you and reports the result when it's done.
+- **Switch models by name**: say "嗨 Claude" ("Hey Claude") to hand over to Claude Code; after giving other models a call name in the admin console, say "嗨 DeepSeek" to switch. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
 - **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
 - **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
-- **Mixed Chinese and English**: the default X-ASR speech recognition runs on your machine without internet and gets sentences like "帮我跑一下 npm install" right; Doubao streaming ASR is also available.
-- **Web admin console**: set up LLMs and API keys, Claude Code's model and permissions, the names you call models by, hotwords and corrections for speech recognition, and the TTS voice; see online devices and environment checks.
+- **Mixed Chinese and English**: the default X-ASR runs offline on your machine and gets sentences like "帮我跑一下 npm install" right; Doubao streaming ASR is also available.
+- **Web admin console**: LLMs and API keys, Claude Code permissions, call names, hotwords and corrections, TTS voice, plus online devices and environment checks.
 
 ## Quick start
 
-Requirements:
+Before you begin: the computer and the device must be on the same LAN, and git must be installed. To use Claude Code, install it and run `claude` once in a terminal to sign in; without it, the installer uses the Claude API instead, and you fill in the API key in the admin console.
 
-- the computer and the device on the same LAN;
-- to use Claude Code, install it first and run `claude` once in a terminal to sign in. Without Claude Code, the installer uses the Claude API instead; just fill in the API key in the admin console.
+### 1. Install
 
-### macOS / Linux
-
-You need git (on macOS, run `xcode-select --install` if it is missing). On macOS, the installer uses [Homebrew](https://brew.sh) to install ffmpeg and opus if they are missing, so in that case install Homebrew first.
-
-Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login (press Enter to accept):
+**macOS / Linux**, in a terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
 ```
 
-If you prefer not to pipe into bash, download and install manually:
+It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server at login (press Enter to accept). On macOS, missing ffmpeg and opus are installed with [Homebrew](https://brew.sh), so install Homebrew first in that case.
 
-```bash
-git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
-cd xiaozhi-hub-server
-bash scripts/install.sh   # install
-bash scripts/start.sh     # start (if autostart is not enabled)
-```
-
-To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh`; to uninstall (this also removes autostart): `bash ~/xiaozhi-hub-server/scripts/uninstall.sh` (use your own directory if you cloned manually).
-
-### Windows
-
-You need Windows 10 or 11 with git (if it is missing, run `winget install --id Git.Git -e` in PowerShell, then reopen PowerShell).
-
-Run in PowerShell:
+**Windows 10 / 11**, in PowerShell:
 
 ```powershell
 git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
@@ -84,36 +66,44 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # install
 powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # start
 ```
 
-- The installer sets up uv, Python 3.10, the dependencies and the speech recognition model; ffmpeg is installed with winget, and `opus.dll` is downloaded automatically.
-- On first start, Windows Firewall asks whether Python may access the network. Allow it on private networks, or the device cannot connect.
-- Windows has no autostart yet; run `start.ps1` once after each boot.
-- To update later: run `git pull` in the project folder, then run `install.ps1` again to add any new dependencies.
-- To uninstall: first run `cd ~` to leave the project folder (Windows cannot delete a folder that is in use), then run `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1` (use the actual path if the project is not in your user folder).
+On first start, Windows Firewall asks whether Python may access the network. Allow it on private networks, or the device cannot connect. Windows has no autostart yet; run `start.ps1` once after each boot.
 
-Once the server is running, you need two addresses:
+To install without `curl | bash`, speed up slow downloads, or see what gets installed, read [User guide · Install](hub-docs/guide.md#1-安装) (Chinese).
 
-| | Address | Use |
+### 2. Set the admin password
+
+Open `http://127.0.0.1:16688/admin` in a browser on this computer and set an admin password on first use.
+
+### 3. Connect the device
+
+When setting up the device's network, enter the OTA address under "Advanced options":
+
+```
+http://<your computer's LAN IP>:16688/xiaozhi/ota/
+```
+
+For StackChan setup steps and how to talk to the device, see the [user guide](hub-docs/guide.md#3-连接设备) (Chinese).
+
+## Update and uninstall
+
+| | macOS / Linux | Windows |
 | --- | --- | --- |
-| Admin console | `http://127.0.0.1:16688/admin` | Open it in a browser on this computer; set an admin password on first use |
-| OTA address | `http://<your computer's LAN IP>:16688/xiaozhi/ota/` | Enter it under "Advanced options" when setting up the device's network |
+| Update | `bash ~/xiaozhi-hub-server/scripts/update.sh` | Run `git pull` in the project folder, then `install.ps1` again |
+| Uninstall | `bash ~/xiaozhi-hub-server/scripts/uninstall.sh` | Run `scripts\uninstall.ps1`; see the [user guide](hub-docs/guide.md#卸载) first |
 
-For StackChan setup steps, how to talk to the device, and the FAQ, see the **[user guide](hub-docs/guide.md)** (Chinese).
-
-## Documentation
-
-- [User guide](hub-docs/guide.md) (Chinese): installation, device setup, how to talk to it, FAQ.
-- [Design notes](hub-docs/design.md) (Chinese): what happens from wake word to disconnect, when the connection and the Claude Code process start and stop, what is saved, and why it is designed this way.
-- The "How it works" page in the admin console: based on your current settings, what each step uses and what happens when you say what.
+If you cloned manually, replace `~/xiaozhi-hub-server` with your own directory. For turning autostart on and off and what uninstall removes, see [User guide · Autostart, update and uninstall](hub-docs/guide.md#7-开机自启更新与卸载) (Chinese).
 
 ## Security
 
 - Use the server only on your LAN. Do not expose it to the internet.
 - By default Claude Code can only read files in the working directory `~/xiaozhi-workspace`. Once you allow writing files or running commands in the admin console, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
 
-## Repository layout
+## About this repository
 
-This project only runs `main/xiaozhi-server`, plus `scripts/` (install, start, autostart, update and uninstall scripts) and `hub-docs/` (documentation). The other directories are unchanged code from the upstream [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (management console, digital human front end, Docker deployment, and so on) and are not used. They are kept so that regular merges from upstream, which keep up with Xiaozhi firmware updates, produce fewer conflicts. The one-line installer downloads only the directories that are used.
+This project only uses `main/xiaozhi-server`, `scripts/` and `hub-docs/`. The other directories are unchanged code from the upstream [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) and are not used. They are kept so that regular merges from upstream, which keep up with Xiaozhi firmware updates, produce fewer conflicts; the one-line installer does not download them.
+
+To learn what happens from wake word to answer, read the [design notes](hub-docs/design.md) (Chinese) or the "How it works" page in the admin console.
 
 ## License
 
-[MIT License](LICENSE). This project is based on [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (MIT). Third-party credits are listed in the [user guide](hub-docs/guide.md#致谢与许可).
+[MIT License](LICENSE). Based on [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (MIT). Third-party credits are listed in the [user guide](hub-docs/guide.md#致谢与许可).
