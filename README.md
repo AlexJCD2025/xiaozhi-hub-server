@@ -47,9 +47,12 @@
 
 需要：
 
-- macOS 或 Linux，已安装 git；macOS 上没有 ffmpeg、opus 时，还需要 [Homebrew](https://brew.sh) 来安装它们。Windows 脚本还没有实测，也还没有一键安装、开机自启和更新脚本；
 - 电脑和设备连在同一个局域网；
-- 使用 Claude Code 的话，先安装好，并在终端运行一次 `claude` 登录。
+- 使用 Claude Code 的话，先安装好，并在终端运行一次 `claude` 登录。没装 Claude Code 时，安装脚本会改用 Claude API，到管理后台填 API Key 就行。
+
+### macOS / Linux
+
+需要已安装 git（macOS 没有时运行 `xcode-select --install`）。macOS 上没有 ffmpeg、opus 时，安装脚本用 [Homebrew](https://brew.sh) 安装它们。
 
 在终端运行这一行。代码会装到 `~/xiaozhi-hub-server`，安装结束时会询问是否开机自启（直接回车就是开启）：
 
@@ -67,6 +70,25 @@ bash scripts/start.sh     # 启动（没有开启开机自启时）
 ```
 
 以后更新到最新版本：`bash ~/xiaozhi-hub-server/scripts/update.sh`；卸载：`bash ~/xiaozhi-hub-server/scripts/uninstall.sh`，会一起取消开机自启（手动下载的，换成自己的目录）。
+
+### Windows
+
+需要 Windows 10 或 11，已安装 git（没有的话在 PowerShell 里运行 `winget install --id Git.Git -e`，装完重新打开 PowerShell）。
+
+在 PowerShell 里运行：
+
+```powershell
+git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
+cd xiaozhi-hub-server
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # 安装
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # 启动
+```
+
+- 安装脚本会自动准备 uv、Python 3.10、依赖和语音识别模型；ffmpeg 用 winget 安装，opus 自动下载 `opus.dll`。
+- 第一次启动时，Windows 防火墙会询问是否允许 Python 访问网络，请勾选"专用网络"并允许，否则设备连不上。
+- Windows 目前没有开机自启，每次开机后运行一次 `start.ps1`。
+- 以后更新：在项目目录里运行 `git pull`，再运行一次 `install.ps1` 补装新增的依赖。
+- 卸载：`powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。
 
 服务启动后，会用到两个地址：
 

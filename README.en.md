@@ -47,9 +47,12 @@ listens, speaks      recognizes, routes, synthesizes            thinks and does 
 
 Requirements:
 
-- macOS or Linux with git; on macOS, [Homebrew](https://brew.sh) is needed if ffmpeg or opus is missing. The Windows scripts have not been tested yet, and Windows has no one-line install, autostart or update script yet;
 - the computer and the device on the same LAN;
-- to use Claude Code, install it first and run `claude` once in a terminal to sign in.
+- to use Claude Code, install it first and run `claude` once in a terminal to sign in. Without Claude Code, the installer uses the Claude API instead; just fill in the API key in the admin console.
+
+### macOS / Linux
+
+You need git (on macOS, run `xcode-select --install` if it is missing). On macOS, the installer uses [Homebrew](https://brew.sh) to install ffmpeg and opus if they are missing.
 
 Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login (press Enter to accept):
 
@@ -67,6 +70,25 @@ bash scripts/start.sh     # start (if autostart is not enabled)
 ```
 
 To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh`; to uninstall (this also removes autostart): `bash ~/xiaozhi-hub-server/scripts/uninstall.sh` (use your own directory if you cloned manually).
+
+### Windows
+
+You need Windows 10 or 11 with git (if it is missing, run `winget install --id Git.Git -e` in PowerShell, then reopen PowerShell).
+
+Run in PowerShell:
+
+```powershell
+git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
+cd xiaozhi-hub-server
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # install
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # start
+```
+
+- The installer sets up uv, Python 3.10, the dependencies and the speech recognition model; ffmpeg is installed with winget, and `opus.dll` is downloaded automatically.
+- On first start, Windows Firewall asks whether Python may access the network. Allow it on private networks, or the device cannot connect.
+- Windows has no autostart yet; run `start.ps1` once after each boot.
+- To update later: run `git pull` in the project folder, then run `install.ps1` again to add any new dependencies.
+- To uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`.
 
 Once the server is running, you need two addresses:
 
