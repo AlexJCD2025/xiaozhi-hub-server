@@ -71,6 +71,18 @@ def test_tips_follow_config(cli_path):
     assert "“退出”" in tips["结束"]["say"] and "2 分钟没人说话" in tips["结束"]["result"]
 
 
+
+def test_tips_and_warning_with_zero_values(tmp_path):
+    """超时、空闲关闭填 0 有特别含义（不限制、每轮结束就关），不能显示成"0 秒"或退回默认值。"""
+    path = tmp_path / ".config.yaml"
+    path.write_text(CLI_YAML.replace("    model: haiku\n", "    model: haiku\n    turn_timeout_seconds: 0\n"
+                                     "    idle_timeout_seconds: 0\n    resume_window_minutes: 0\n"), encoding="utf-8")
+    m = merged(path)
+    tips = {t["title"]: t for t in pipeline.describe_flow(m)["tips"]}
+    assert tips["长任务"]["result"].startswith("设备陪着等，不限时长；")
+    assert "自动接上" not in tips["接着上次聊"]["result"]  # 自动接续填 0：只在说接续指令时接上
+    assert not pipeline.describe_prompt(m)["warnings"]  # 每轮结束就关进程，提示词每轮都是新的
+
 def test_tips_with_call_names_disabled_and_api(tmp_path):
     path = tmp_path / ".config.yaml"
     path.write_text(API_YAML + "\ncall_names:\n  enabled: false\n", encoding="utf-8")

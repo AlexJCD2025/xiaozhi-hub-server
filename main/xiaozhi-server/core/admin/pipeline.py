@@ -146,6 +146,13 @@ def _duration(seconds) -> str:
     return f"{int(seconds)} 秒"
 
 
+def _setting(entry: dict, key: str, default: float) -> float:
+    """和 claude_cli 读配置的规则一样：没填（None 或空字符串）用默认值，填 0 就是 0。"""
+    from core.providers.llm.claude_cli.claude_cli import _num
+
+    return _num(entry, key, default)
+
+
 def _quoted(words, sep: str = "") -> str:
     return sep.join(f"“{w}”" for w in words)
 
@@ -171,12 +178,13 @@ def describe_tips(merged: dict) -> list:
     tips.append({"title": "打断", "say": "设备说话时，点一下屏幕上的脸",
                  "result": "马上停下，然后可以说下一句。设备说话时不收音，不能直接插话"})
     if cli:
-        progress = cli.get("progress_interval_seconds", 30)
+        progress = _setting(cli, "progress_interval_seconds", 30)
+        turn = _setting(cli, "turn_timeout_seconds", 600)
         tips.append({"title": "长任务", "say": "让 Claude 做要几分钟的事",
-                     "result": f"设备陪着等，最长 {_duration(cli.get('turn_timeout_seconds', 600))}"
+                     "result": ("设备陪着等，不限时长" if not turn else f"设备陪着等，最长 {_duration(turn)}")
                                + (f"；{_duration(progress)}没开口就提示一次进度" if progress else "")
                                + "。被停下或打断后，说“继续”接着做"})
-        window = float(cli.get("resume_window_minutes", 120) or 0)
+        window = _setting(cli, "resume_window_minutes", 120)
         keywords = cli.get("resume_keywords") or ["接着上次聊"]
         said = _quoted(keywords[:2], "或")
         result = (f"{_duration(window * 60)}内再唤醒，Claude 自动接上上次的对话；隔得更久的，说{said}也能接上"
@@ -308,9 +316,10 @@ def describe_prompt(merged: dict) -> dict:
 
     warnings = []
     if is_cli:
-        idle = int(llm.get("idle_timeout_seconds") or 300)
-        idle_text = f"{idle // 60} 分钟" if idle % 60 == 0 else f"{idle} 秒"
-        warnings.append(f"提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 {idle_text}才关闭）里面的日期、时间不会更新。")
+        idle = _setting(llm, "idle_timeout_seconds", 300)
+        if idle:  # 填 0 时每轮结束就关进程，下一轮重新传入，日期时间总是新的
+            warnings.append(f"提示词在 Claude Code 进程启动时一次性传入，进程存活期间（空闲 {_duration(idle)}才关闭）"
+                            "里面的日期、时间不会更新。")
 
     actual = _system_prompt_of(conn) if conn is not None else ""
     return {
