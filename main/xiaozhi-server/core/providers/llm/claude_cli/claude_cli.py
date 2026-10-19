@@ -49,6 +49,8 @@ VOICE_RULES = f"""
 6. 不要用后台方式运行命令或任务（例如 run_in_background）：这一轮说完后你没法再主动开口，后台任务的结果用户永远听不到。需要等的命令就在前台运行，把超时设够；设备会陪着等，期间会自动提示"还在处理"。
 """
 
+SENTENCE_ENDS = "。！？!?.;；~～…"
+
 COMMON_CLI_PATHS = [
     "~/.claude/local/claude",
     "~/.local/bin/claude",
@@ -113,6 +115,7 @@ class ConnState:
     intent_warned: bool = False
     closed: bool = False  # 连接已关闭：不再启动或保留 Claude Code 进程
     turn_gen: int = 0  # 每开始一轮加 1，用于让过期的空闲定时器失效
+    turn_task: Optional[asyncio.Task] = None  # 正在执行的一轮，卡死时要取消它，否则它一直占着锁
 
 
 class LLMProvider(LLMProviderBase):
@@ -143,6 +146,7 @@ class LLMProvider(LLMProviderBase):
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
         self.filler = single_sentence(config.get("first_reply_filler", "好的，我看一下"))
         self.filler_delay = _num(config, "filler_delay_seconds", 2)
+        self.abandon_grace = 5.0  # 发出中断后等这么久，这一轮还没停下就强制关闭进程
         self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
 
         self._states: Dict[str, ConnState] = {}
@@ -270,13 +274,20 @@ class LLMProvider(LLMProviderBase):
             st.idle_handle = None
             await self._close_agent(st, f"空闲 {int(self.idle_timeout)} 秒")
 
-    async def _abandon_if_stuck(self, st: ConnState, gen: int, grace: float = 5) -> None:
-        """超时或设备打断后已发送中断；如果这一轮过了 grace 秒还没结束，说明 Claude Code 卡死了，直接结束进程。
-        下一轮会自动重新启动进程（在接续窗口内会接续原会话）。"""
-        await asyncio.sleep(grace)
-        if st.turn_gen == gen and st.lock is not None and st.lock.locked() and st.agent:
+    async def _abandon_if_stuck(self, st: ConnState, gen: int) -> None:
+        """超时或设备打断后已发送中断；如果这一轮过了 abandon_grace 秒还没结束，说明 Claude Code 卡死了，直接结束进程。
+        下一轮会自动重新启动进程（在接续窗口内会接续原会话）。
+
+        关闭进程不一定能让卡住的那一轮退出（它可能还在等一个永远不来的消息），所以还要取消它，
+        否则它一直占着锁，下一句话会排队等到超时。
+        """
+        await asyncio.sleep(self.abandon_grace)
+        if st.turn_gen == gen and st.lock is not None and st.lock.locked():
             logger.bind(tag=TAG).warning("中断后 Claude Code 仍未结束本轮，强制关闭进程")
+            task = st.turn_task
             await self._close_agent(st, "中断无效")
+            if task is not None and not task.done() and st.turn_gen == gen:
+                task.cancel()
 
     async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
         """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。
@@ -329,6 +340,7 @@ class LLMProvider(LLMProviderBase):
             st.lock = asyncio.Lock()
         async with st.lock:
             st.turn_gen += 1
+            st.turn_task = asyncio.current_task()
             if st.idle_handle:
                 st.idle_handle.cancel()
                 st.idle_handle = None
@@ -390,8 +402,9 @@ class LLMProvider(LLMProviderBase):
                         last_spoken_at, tail = time.time(), self.filler[-1]
                         yield f"😶{self.filler}"
                     elif self._progress_due(last_spoken_at, tail, first_at is not None or filler_sent):
+                        notice = self._before_notice(tail, first_at is not None or filler_sent) + self.progress_reply
                         last_spoken_at, tail = time.time(), self.progress_reply[-1]
-                        yield self.progress_reply if (first_at is not None or filler_sent) else f"😶{self.progress_reply}"
+                        yield notice
                     stalled = not tools_running and time.time() - last_event_at >= self.stall_timeout
                     if elapsed >= self.turn_timeout or stalled:
                         kind = ErrorKind.STALLED if stalled else ErrorKind.TIMEOUT
@@ -401,8 +414,7 @@ class LLMProvider(LLMProviderBase):
                         if st.agent:
                             asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
                             asyncio.run_coroutine_threadsafe(self._abandon_if_stuck(st, st.turn_gen), self._loop)
-                        prefix = "" if (first_at is not None or filler_sent) else "😶"
-                        yield prefix + Error(kind).voice_message
+                        yield self._before_notice(tail, first_at is not None or filler_sent) + Error(kind).voice_message
                         finished = True
                         return
                     continue
@@ -429,8 +441,7 @@ class LLMProvider(LLMProviderBase):
                     yield ev.text
                 elif isinstance(ev, Error):
                     logger.bind(tag=TAG).error(f"Claude Code 错误 [{ev.kind.value}]: {ev.detail[:500]}")
-                    prefix = "" if (first_at is not None or filler_sent) else "😶"
-                    yield prefix + ev.voice_message
+                    yield self._before_notice(tail, first_at is not None or filler_sent) + ev.voice_message
                     finished = True
                     return
                 elif isinstance(ev, Done):
@@ -456,13 +467,24 @@ class LLMProvider(LLMProviderBase):
         if st.conn is not None:
             st.conn.last_activity_time = time.time() * 1000
 
+    @staticmethod
+    def _before_notice(tail: str, spoke: bool) -> str:
+        """服务端自己插一句话（超时、出错、进度提示）前要加的东西。
+
+        还没说过话：加一个表情，设备才会换脸；已经说了半句（结尾不是句末标点）：先补个句号把那半句收住，
+        否则 TTS 会把两句粘成一句念，比如"我先看一下文件这件事做得太久"。
+        """
+        if not spoke:
+            return "😶"
+        return "" if not tail or tail in SENTENCE_ENDS or tail in textUtils.EMOJI_MAP else "。"
+
     def _progress_due(self, last_spoken_at: float, tail: str, spoke: bool) -> bool:
         """该不该说一句进度：超过间隔没开口，而且上一句已经说完（不在半句话中间插话）。"""
         if not self.progress_reply or not self.progress_interval:
             return False
         if time.time() - last_spoken_at < self.progress_interval:
             return False
-        return not spoke or not tail or tail in "。！？!?.;；~～…" or tail in textUtils.EMOJI_MAP
+        return not spoke or not tail or tail in SENTENCE_ENDS or tail in textUtils.EMOJI_MAP
 
     def _send_emotion(self, st: ConnState, emoji: str) -> None:
         conn = st.conn

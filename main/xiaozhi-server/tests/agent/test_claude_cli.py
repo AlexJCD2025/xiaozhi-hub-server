@@ -124,6 +124,18 @@ async def test_activity_reported_for_non_text_events_and_throttled():
     assert any(isinstance(e, TextDelta) and e.text == "好" for e in evs)
 
 
+async def test_transition_sentence_closed_before_tool():
+    """过渡语没有句末标点就去调用工具时补一个句号，TTS 才会马上念出来，不用等工具跑完。"""
+    s = session_with([delta("🙂我先看一下文件"), assistant(TextBlock("🙂我先看一下文件"), ToolUseBlock(id="t", name="Read", input={})),
+                      delta("看完了。"), result()])
+    texts = [e.text for e in await collect(s) if isinstance(e, TextDelta)]
+    assert texts == ["🙂我先看一下文件", "。", "看完了。"]  # 只补一次，下一段话前不再重复补
+    s = session_with([delta("🙂我看看："), assistant(ToolUseBlock(id="t", name="Read", input={})), result()])
+    assert [e.text for e in await collect(s) if isinstance(e, TextDelta)] == ["🙂我看看：", "。"]
+    s = session_with([delta("🙂我看看。"), assistant(ToolUseBlock(id="t", name="Read", input={})), result()])
+    assert [e.text for e in await collect(s) if isinstance(e, TextDelta)] == ["🙂我看看。"]  # 已经有句号就不补
+
+
 async def test_activity_reports_running_tools_immediately():
     """正在执行的工具数一变就上报（不受 1 秒节流限制），调用方据此判断"在跑工具"还是"卡住"。"""
     s = session_with([assistant(ToolUseBlock(id="t1", name="Bash", input={"command": "make"})),
@@ -590,6 +602,32 @@ def test_session_recorded_as_soon_as_claude_starts(provider):
     out = run(provider, c, "整理一下文件")
     assert "说继续" in out  # 超时提示告诉用户怎么接着做
     assert provider.store.get("dev-1")["session_id"] == "new-0"
+
+
+def test_stuck_turn_does_not_block_next_sentence(provider):
+    """Claude Code 卡死：中断无效、关闭进程也没让那一轮退出时，要取消它，否则下一句话一直排队。"""
+    from core.agent.agent_session import Activity
+    provider.filler, provider.turn_timeout, provider.stall_timeout, provider.abandon_grace = "", 0.5, 30, 0.3
+    FakeAgent.script = [[Activity("x"), 60.0, Done()], [TextDelta("🙂接着做完了"), Done()]]  # 第一轮卡住不动
+    c = conn()
+    provider.on_conn_open(c)
+    assert "说继续" in run(provider, c, "做个长任务")
+    time.sleep(0.6)  # 等强制关闭
+    provider.turn_timeout = 3
+    t0 = time.time()
+    assert run(provider, c, "继续").endswith("🙂接着做完了")
+    assert time.time() - t0 < 2
+    assert FakeAgent.instances[0].closed and len(FakeAgent.instances) == 2  # 卡死的进程关掉，重新启动了一个
+
+
+def test_notice_not_glued_to_half_sentence(provider):
+    """超时提示前如果 Claude 只说了半句，先补句号收住，不能和半句话粘成一句念。"""
+    from core.agent.agent_session import Activity
+    provider.filler, provider.turn_timeout, provider.stall_timeout = "", 0.5, 30
+    FakeAgent.script = [[TextDelta("🙂我先看一下文件"), Activity("x", tools_running=1), 5.0, Done()]]
+    c = conn()
+    provider.on_conn_open(c)
+    assert run(provider, c, "看看").startswith("🙂我先看一下文件。这件事做得太久")
 
 
 def test_session_not_recorded_when_first_event_is_error(provider):
