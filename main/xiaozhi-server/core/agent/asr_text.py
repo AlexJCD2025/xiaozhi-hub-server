@@ -13,6 +13,11 @@ import threading
 import time
 from collections import deque
 
+from config.logger import setup_logging
+
+TAG = __name__
+logger = setup_logging()
+
 # 默认替换表；config.yaml 的 asr_corrections 会整个覆盖它
 DEFAULT_CORRECTIONS = {"Claude Code": ["cloud code", "克拉德扣的", "克劳德扣的", "克劳德code"]}
 
@@ -65,7 +70,8 @@ def apply_corrections(text: str, corrections: dict) -> str:
     if not text:
         return text
     for pattern, target in _rules(corrections):
-        text = pattern.sub(target, text)
+        # 用函数返回替换内容：正确写法里的反斜杠（如 C:\Users）不能当成正则的转义或分组引用
+        text = pattern.sub(lambda _m, t=target: t, text)
     return text
 
 
@@ -129,7 +135,11 @@ def correct_and_record(conn, raw_text):
     content = raw_text.get("content", "") if isinstance(raw_text, dict) else raw_text
     if not isinstance(content, str) or not content:
         return raw_text
-    fixed = apply_corrections(content, corrections_of(getattr(conn, "config", None)))
+    try:
+        fixed = apply_corrections(content, corrections_of(getattr(conn, "config", None)))
+    except Exception as e:  # 纠错出错不能连累整句识别
+        logger.bind(tag=TAG).warning(f"识别后纠错失败，使用原文: {e}")
+        fixed = content
     record(getattr(conn, "device_id", ""), content, fixed)
     if isinstance(raw_text, dict):
         return {**raw_text, "content": fixed}
