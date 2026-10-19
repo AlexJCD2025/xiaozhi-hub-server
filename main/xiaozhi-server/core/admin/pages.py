@@ -333,17 +333,33 @@ def asr_label(entry: dict) -> str:
     return f"本地识别 · {name}（sherpa-onnx），不需要联网"
 
 
+def asr_choice(merged: dict) -> str:
+    """当前用的是后台能选的哪一种：local（本地 X-ASR）、doubao，或 other（手动改了配置）。"""
+    name = _selected(merged, "ASR")
+    entry = _entry(merged, "ASR", name)
+    if name == catalog.LOCAL_ASR_ENTRY and entry.get("type") == "sherpa_onnx_local":
+        return "local"
+    if name == catalog.DOUBAO_ASR_ENTRY and entry.get("type") == "doubao_stream":
+        return "doubao"
+    return "other"
+
+
 def describe_asr(merged: dict) -> dict:
     name = _selected(merged, "ASR")
     entry = _entry(merged, "ASR", name)
     info = [{"label": "模型目录", "value": str(entry.get("model_dir") or "")}] if entry.get("model_dir") else []
     if entry.get("model_type"):
         info.append({"label": "模型类型", "value": str(entry["model_type"])})
+    local = _entry(merged, "ASR", catalog.LOCAL_ASR_ENTRY)
     return {
         "selected": name,
         "label": asr_label(entry),
         "info": info,
         "model": asr_model_check(entry),
+        "choice": asr_choice(merged),
+        "local": {"exists": local.get("type") == "sherpa_onnx_local", "label": asr_label(local),
+                  "model": asr_model_check(local)},
+        "doubao": describe_doubao(merged),
         "vad": describe_vad(merged),
         "hotwords": describe_hotwords(merged),
         "corrections": describe_corrections(merged),
@@ -351,34 +367,119 @@ def describe_asr(merged: dict) -> dict:
     }
 
 
+# ---------- 豆包流式语音识别 ----------
+# 新版火山引擎控制台只给一个 API Key；旧版控制台给 APP ID + Access Token。填了 API Key 就按新版鉴权
+
+def describe_doubao(merged: dict) -> dict:
+    entry = _entry(merged, "ASR", catalog.DOUBAO_ASR_ENTRY)
+    key, token = entry.get("api_key"), entry.get("access_token")
+    key_set, token_set = not config_store.is_placeholder(key), not config_store.is_placeholder(token)
+    appid = _text(entry.get("appid"))
+    resource = _text(entry.get("resource_id")) or catalog.DOUBAO_RESOURCES[0]["value"]
+    exists = entry.get("type") == "doubao_stream"
+    return {
+        "entry": catalog.DOUBAO_ASR_ENTRY,
+        "auth": "app" if not key_set and appid else "key",
+        "key_set": key_set,
+        "key_hint": config_store.mask_key(key),
+        "appid": appid,
+        "token_set": token_set,
+        "token_hint": config_store.mask_key(token),
+        "resource_id": resource,
+        "resources": catalog.DOUBAO_RESOURCES,
+        "configured": exists and (key_set or bool(appid and token_set)),
+        "conflict": bool(entry) and not exists,
+    }
+
+
+def _doubao_values(payload: dict, entry: dict) -> dict:
+    """校验页面提交的值，返回 {auth, api_key, appid, access_token, resource_id}；密钥留空时用已保存的。"""
+    payload = payload or {}
+    auth = str(payload.get("auth") or "key")
+    if auth not in ("key", "app"):
+        raise ValueError("鉴权方式只能是 API Key 或 APP ID + Access Token")
+    resource = (str(payload.get("resource_id") or "").strip() or _text(entry.get("resource_id"))
+                or catalog.DOUBAO_RESOURCES[0]["value"])
+    if resource not in catalog.DOUBAO_RESOURCE_VALUES:
+        raise ValueError("不支持这个资源 ID")
+    values = {"auth": auth, "resource_id": resource}
+    for field, label in (("api_key", "API Key"), ("access_token", "Access Token")):
+        raw = str(payload.get(field) or "").strip()
+        if any(c.isspace() for c in raw):
+            raise ValueError(f"{label} 里不能有空格或换行")
+        values[field] = raw or _text(entry.get(field))
+    values["appid"] = str(payload.get("appid") or "").strip() or _text(entry.get("appid"))
+    if auth == "key" and not values["api_key"]:
+        raise ValueError("请填写 API Key")
+    if auth == "app":
+        if not re.fullmatch(r"[A-Za-z0-9]+", values["appid"]):
+            raise ValueError("请填写 APP ID（只有字母和数字）")
+        if not values["access_token"]:
+            raise ValueError("请填写 Access Token")
+    return values
+
+
+def save_doubao(payload: dict, merged: dict, path: Path = None) -> list:
+    """保存豆包的鉴权和资源 ID，返回修改的字段。用 APP ID 鉴权时清掉 API Key（有 API Key 时优先用它）。"""
+    entry = _entry(merged, "ASR", catalog.DOUBAO_ASR_ENTRY)
+    if entry and entry.get("type") != "doubao_stream":
+        raise ValueError(f"配置里的 {catalog.DOUBAO_ASR_ENTRY} 不是豆包流式识别，请在配置文件里改名或删掉它")
+    values = _doubao_values(payload, entry)
+    wanted = {"resource_id": values["resource_id"]}
+    if values["auth"] == "key":
+        wanted["api_key"] = values["api_key"]
+    else:
+        wanted.update(appid=values["appid"], access_token=values["access_token"], api_key="")
+    changes = {k: v for k, v in wanted.items() if v != _text(entry.get(k))}
+    if not entry:
+        changes = {"type": "doubao_stream", "enable_multilingual": False, "end_window_size": 200,
+                   "output_dir": "tmp/", **changes}
+    if not changes:
+        return []
+    with config_store.edit_custom(path) as data:
+        target = data.setdefault("ASR", CommentedMap()).setdefault(catalog.DOUBAO_ASR_ENTRY, CommentedMap())
+        for field, value in changes.items():
+            target[field] = value
+    return [f for f in changes if f in wanted]
+
+
+def doubao_test_config(payload: dict, merged: dict) -> dict:
+    """测试连接用的配置：页面上还没保存的值优先。"""
+    entry = _entry(merged, "ASR", catalog.DOUBAO_ASR_ENTRY)
+    values = _doubao_values(payload, entry)
+    config = {k: v for k, v in entry.items() if k != "type"}
+    config.update(resource_id=values["resource_id"], api_key=values["api_key"] if values["auth"] == "key" else "",
+                  appid=values["appid"], access_token=values["access_token"])
+    return config
+
+
 # ---------- 热词 ----------
-# 支持热词的 sherpa-onnx 模型类型：transducer（X-ASR）解码时给热词加分；funasr_nano / qwen3_asr 把热词写进提示
-HOTWORD_MODEL_TYPES = {"transducer", "funasr_nano", "qwen3_asr"}
+# 所有支持热词的识别共用一份，存在配置顶层的 asr_hotwords（见 core/agent/asr_text.py）
 HOTWORD_MAX = 200
 HOTWORD_BAD = re.compile(r"[,，\n\r\t]")
-
-
-def hotwords_supported(entry: dict) -> bool:
-    return entry.get("type") == "sherpa_onnx_local" and entry.get("model_type") in HOTWORD_MODEL_TYPES
+hotwords_supported = asr_text.hotwords_supported
 
 
 def describe_hotwords(merged: dict) -> dict:
     entry = _entry(merged, "ASR", _selected(merged, "ASR"))
-    configured = asr_text._aliases(entry.get("hotwords"))
+    configured = asr_text.hotwords_of(merged)
     seen = {w.lower() for w in configured}
-    return {
+    result = {
         "supported": hotwords_supported(entry),
         "words": configured,
         "auto": [w for w in asr_text.call_name_hotwords(merged) if w.lower() not in seen],
+        "dropped": [],
     }
+    if entry.get("type") == "doubao_stream":
+        multilingual = str(entry.get("enable_multilingual", False)).lower() != "false"
+        _, result["dropped"] = asr_text.doubao_hotwords(asr_text.effective_hotwords(entry, merged), multilingual)
+    return result
 
 
 def save_hotwords(words, merged: dict, path: Path = None) -> list:
-    """把热词整个写进 data/.config.yaml 当前语音识别条目（会覆盖 config.yaml 里的默认列表）。返回修改的字段。"""
-    name = _selected(merged, "ASR")
-    entry = _entry(merged, "ASR", name)
-    if not hotwords_supported(entry):
-        raise ValueError("当前语音识别不支持热词（支持的有 X-ASR、Fun-ASR-Nano、Qwen3-ASR）")
+    """把热词整个写进 data/.config.yaml 的 asr_hotwords，同时删掉旧版本存在识别条目里的。返回修改的字段。"""
+    if not hotwords_supported(_entry(merged, "ASR", _selected(merged, "ASR"))):
+        raise ValueError("当前语音识别不支持热词（支持的有 X-ASR、豆包流式语音识别）")
     if not isinstance(words, list):
         raise ValueError("热词格式不对")
     result = []
@@ -392,11 +493,13 @@ def save_hotwords(words, merged: dict, path: Path = None) -> list:
             result.append(w)
     if len(result) > HOTWORD_MAX:
         raise ValueError(f"热词最多 {HOTWORD_MAX} 个；太多会让识别变慢，也更容易误认")
-    if result == asr_text._aliases(entry.get("hotwords")):
+    if result == asr_text.hotwords_of(merged) and "asr_hotwords" in merged:
         return []
     with config_store.edit_custom(path) as data:
-        target = data.setdefault("ASR", CommentedMap()).setdefault(name, CommentedMap())
-        target["hotwords"] = CommentedSeq(result)
+        data["asr_hotwords"] = CommentedSeq(result)
+        for entry in (data.get("ASR") or {}).values():
+            if isinstance(entry, dict):
+                entry.pop("hotwords", None)
     return ["hotwords"]
 
 

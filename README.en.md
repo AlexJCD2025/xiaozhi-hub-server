@@ -43,7 +43,7 @@ A **local hub server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and
 - **Web admin console**:
   - Set up LLMs and API keys; choose the model, thinking level and permission level for Claude Code.
   - Give each model a name to call it by: add it by hand, or say it to the device a few times to record it.
-  - Speech recognition: set how long a pause ends a sentence, hotwords, and post-recognition corrections (e.g. turn "cloud code" into "Claude Code"); review recent transcripts and add misheard words to the hotwords or corrections in one click.
+  - Speech recognition: switch between local X-ASR and Doubao streaming ASR (just paste the API Key and test the connection); set how long a pause ends a sentence, hotwords (shared by both), and post-recognition corrections (e.g. turn "cloud code" into "Claude Code"); review recent transcripts and add misheard words to the hotwords or corrections in one click.
   - Pick and preview a TTS voice, configure intent recognition.
   - See environment checks and online devices, and send test expressions to a device.
   - A "How it works" page shows the full path of one sentence from the device to playback, and the prompt sent to the LLM.

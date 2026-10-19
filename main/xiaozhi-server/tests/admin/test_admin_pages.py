@@ -10,6 +10,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from core.admin import catalog, config_store, connections, pages
 from core.admin import admin_handler as ah
+from core.providers.asr import doubao_stream
 
 CUSTOM_YAML = """\
 selected_module:
@@ -468,12 +469,15 @@ def test_asr_model_check_by_model_type(tmp_path):
 
 
 def test_default_xasr_entry_and_label(tmp_path):
-    """config.yaml 里本项目默认的 X-ASR 条目：transducer 类型，带热词，后台显示为 X-ASR。"""
+    """config.yaml 里本项目默认的 X-ASR 条目：transducer 类型，支持热词（默认热词在代码里），后台显示为 X-ASR。"""
     empty = tmp_path / ".config.yaml"
     empty.write_text("{}\n", encoding="utf-8")
-    entry = config_store.load_merged(custom_path=empty)["ASR"]["SherpaXASR"]
+    cfg = config_store.load_merged(custom_path=empty)
+    entry = cfg["ASR"]["SherpaXASR"]
     assert entry["type"] == "sherpa_onnx_local" and entry["model_type"] == "transducer"
-    assert "Claude Code" in entry["hotwords"] and "StackChan" in entry["hotwords"]
+    assert "hotwords" not in entry and pages.hotwords_supported(entry)
+    words = pages.describe_hotwords({**cfg, "selected_module": {"ASR": "SherpaXASR"}})["words"]
+    assert "Claude Code" in words and "StackChan" in words
     assert pages.asr_label(entry) == "本地识别 · X-ASR 中英混合（sherpa-onnx），不需要联网"
     tmpl = (Path(__file__).resolve().parents[4] / "scripts" / "config.template.yaml").read_text(encoding="utf-8")
     assert "ASR: SherpaXASR" in tmpl
@@ -489,7 +493,7 @@ def test_save_hotwords(cfg_path):
     with pytest.raises(ValueError, match="逗号"):
         pages.save_hotwords(["a,b"], merged(cfg_path), cfg_path)
     assert pages.save_hotwords(["GitHub", " Stack  Chan ", "github", ""], merged(cfg_path), cfg_path) == ["hotwords"]
-    assert merged(cfg_path)["ASR"]["SherpaXASR"]["hotwords"] == ["GitHub", "Stack Chan"]  # 整个覆盖、去重
+    assert merged(cfg_path)["asr_hotwords"] == ["GitHub", "Stack Chan"]  # 存在顶层，整个覆盖、去重
     assert pages.save_hotwords(["GitHub", "Stack Chan"], merged(cfg_path), cfg_path) == []
     # SenseVoice 不支持热词
     cfg_path.write_text(CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: SherpaASR\n"), encoding="utf-8")
@@ -519,7 +523,7 @@ async def test_hotwords_and_corrections_endpoints(cfg_path, monkeypatch):
     loaded = []
 
     def fake_init(logger, config, **kwargs):
-        loaded.append(config["ASR"]["SherpaXASR"]["hotwords"])
+        loaded.append(config["asr_hotwords"])
         return {"asr": "new-asr"}
     monkeypatch.setattr(ah, "initialize_modules", fake_init)
     ws = SimpleNamespace(config_lock=asyncio.Lock(), _asr="old-asr")
@@ -534,6 +538,7 @@ async def test_hotwords_and_corrections_endpoints(cfg_path, monkeypatch):
             await c.post("/admin/api/setup", json={"password": "pass-1234"})
             r = await (await c.post("/admin/api/asr/hotwords", json={"words": ["GitHub", "Sonnet"]})).json()
             assert r["applied"] and "重新加载" in r["note"] and ws._asr == "new-asr" and loaded == [["GitHub", "Sonnet"]]
+            assert running["asr_hotwords"] == ["GitHub", "Sonnet"] == fake.config["asr_hotwords"]
             assert (await c.post("/admin/api/asr/hotwords", json={"words": ["a,b"]})).status == 400
             r = await (await c.post("/admin/api/asr/corrections",
                                     json={"items": [{"target": "GitHub", "aliases": ["get hub"]}]})).json()
@@ -545,3 +550,106 @@ async def test_hotwords_and_corrections_endpoints(cfg_path, monkeypatch):
             assert (await c.post("/admin/api/asr/corrections", json={"items": []})).status == 401
     finally:
         connections.unregister(fake)
+
+
+def test_save_hotwords_moves_legacy_list(cfg_path):
+    """旧版本存在 X-ASR 条目里的热词：读得到，保存时搬到顶层并删掉旧的。"""
+    cfg_path.write_text(XASR_YAML + "ASR:\n  SherpaXASR:\n    hotwords: [Docker]\n", encoding="utf-8")
+    assert pages.describe_hotwords(merged(cfg_path))["words"] == ["Docker"]
+    assert pages.save_hotwords(["Docker"], merged(cfg_path), cfg_path) == ["hotwords"]  # 内容一样也要搬
+    m = merged(cfg_path)
+    assert m["asr_hotwords"] == ["Docker"] and "hotwords" not in m["ASR"]["SherpaXASR"]
+
+
+# ---------- 豆包语音识别 ----------
+
+DOUBAO_YAML = CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: DoubaoStreamASRV2\n")
+
+
+def test_describe_doubao_defaults(cfg_path):
+    d = pages.describe_asr(merged(cfg_path))
+    assert d["doubao"]["entry"] == catalog.DOUBAO_ASR_ENTRY and d["doubao"]["configured"] is False  # 占位文本不算
+    assert d["doubao"]["auth"] == "key" and d["doubao"]["resource_id"] == "volc.seedasr.sauc.duration"
+    assert d["local"]["exists"] and d["choice"] in ("local", "other")
+    cfg_path.write_text(DOUBAO_YAML, encoding="utf-8")
+    assert pages.asr_choice(merged(cfg_path)) == "doubao"
+    assert pages.describe_hotwords(merged(cfg_path))["supported"] is True  # 豆包也能用后台的热词
+
+
+@pytest.mark.parametrize("payload, message", [
+    ({"auth": "key"}, "API Key"),
+    ({"auth": "key", "api_key": "a b"}, "空格"),
+    ({"auth": "app", "access_token": "t"}, "APP ID"),
+    ({"auth": "app", "appid": "123"}, "Access Token"),
+    ({"auth": "key", "api_key": "k", "resource_id": "volc.other"}, "资源 ID"),
+    ({"auth": "x"}, "鉴权方式"),
+])
+def test_save_doubao_validation(cfg_path, payload, message):
+    with pytest.raises(ValueError, match=message):
+        pages.save_doubao(payload, merged(cfg_path), cfg_path)
+
+
+def test_save_doubao_auth_modes(cfg_path):
+    key = "volc-key-0123456789"
+    assert pages.save_doubao({"auth": "key", "api_key": key}, merged(cfg_path), cfg_path) == ["api_key"]
+    d = pages.describe_doubao(merged(cfg_path))
+    assert d["configured"] and d["auth"] == "key" and d["key_hint"] == "volc…6789"
+    # 密钥留空表示不改
+    assert pages.save_doubao({"auth": "key", "resource_id": "volc.seedasr.sauc.concurrent"},
+                             merged(cfg_path), cfg_path) == ["resource_id"]
+    # 换成旧版控制台：清掉 API Key，按 APP ID 鉴权
+    changed = pages.save_doubao({"auth": "app", "appid": "123456", "access_token": "tok-abcdefghijk"},
+                                merged(cfg_path), cfg_path)
+    assert set(changed) == {"appid", "access_token", "api_key"}
+    entry = merged(cfg_path)["ASR"]["DoubaoStreamASRV2"]
+    assert entry["api_key"] == "" and entry["appid"] == "123456"
+    d = pages.describe_doubao(merged(cfg_path))
+    assert d["auth"] == "app" and d["configured"] and d["token_set"]
+    # 测试连接的配置：页面上还没保存的值优先
+    cfg = pages.doubao_test_config({"auth": "key", "api_key": "new-key"}, merged(cfg_path))
+    assert cfg["api_key"] == "new-key" and cfg["resource_id"] == "volc.seedasr.sauc.concurrent"  # 没填时用已保存的
+    cfg = pages.doubao_test_config({"auth": "app"}, merged(cfg_path))
+    assert cfg["api_key"] == "" and cfg["access_token"] == "tok-abcdefghijk"
+
+
+def test_describe_hotwords_doubao_dropped(cfg_path):
+    words = [f"word{i:03d}" for i in range(40)]
+    cfg_path.write_text(DOUBAO_YAML + "asr_hotwords: [" + ", ".join(words) + "]\n", encoding="utf-8")
+    h = pages.describe_hotwords(merged(cfg_path))
+    assert h["dropped"] and h["dropped"][-1] == "word039"  # 超出豆包上限，后面的带不上
+
+
+async def test_asr_use_and_doubao_endpoints(cfg_path, monkeypatch):
+    loaded = []
+
+    def fake_init(logger, config, **kwargs):
+        loaded.append(config["selected_module"]["ASR"])
+        return {"asr": "new-asr"}
+    monkeypatch.setattr(ah, "initialize_modules", fake_init)
+
+    async def fake_check(config):
+        return {"ok": True, "seconds": 0.3} if config.get("api_key") == "good-key" else {"ok": False, "error": "鉴权失败"}
+    monkeypatch.setattr(doubao_stream, "check_connection", fake_check)
+    monkeypatch.setattr(pages, "asr_model_check", lambda entry: {"ok": True, "detail": "ok"}
+                        if entry.get("type") == "sherpa_onnx_local" else None)
+    ws = SimpleNamespace(config_lock=asyncio.Lock(), _asr="old-asr")
+    running = {"selected_module": {"ASR": "SherpaXASR"}, "ASR": {}}
+    app = web.Application()
+    ah.AdminHandler(running, ws_server=ws, config_path=cfg_path).register(app)
+    async with TestClient(TestServer(app)) as c:
+        await c.post("/admin/api/setup", json={"password": "pass-1234"})
+        r = await c.post("/admin/api/asr/use", json={"choice": "doubao"})
+        assert r.status == 400 and "还没配置好" in (await r.json())["error"]
+        r = await c.post("/admin/api/asr/doubao/test", json={"auth": "key", "api_key": "bad-key"})
+        assert r.status == 400 and (await r.json())["error"] == "鉴权失败"
+        r = await (await c.post("/admin/api/asr/doubao/test", json={"auth": "key", "api_key": "good-key"})).json()
+        assert r == {"ok": True, "seconds": 0.3}
+        r = await (await c.post("/admin/api/asr/doubao", json={"auth": "key", "api_key": "good-key"})).json()
+        assert r["changed"] == ["api_key"] and loaded == []  # 没在用，只保存不加载
+        r = await (await c.post("/admin/api/asr/use", json={"choice": "doubao"})).json()
+        assert r["ok"] and loaded == ["DoubaoStreamASRV2"] and running["selected_module"]["ASR"] == "DoubaoStreamASRV2"
+        d = await (await c.get("/admin/api/asr")).json()
+        assert d["choice"] == "doubao" and "good-key" not in str(d)  # Key 只写不读
+        r = await (await c.post("/admin/api/asr/use", json={"choice": "local"})).json()
+        assert r["ok"] and loaded[-1] == "SherpaXASR"
+        assert (await c.post("/admin/api/asr/use", json={"choice": "funasr"})).status == 400

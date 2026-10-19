@@ -123,10 +123,11 @@ def initialize_asr(config):
         else config["ASR"][select_asr_module]["type"]
     )
     asr_config = config["ASR"][select_asr_module]
-    # [xiaozhi-hub] 支持热词的条目：把呼名里模型的正确名字（如 Claude、DeepSeek）也并入热词
-    if "hotwords" in asr_config:
-        from core.agent.asr_text import effective_hotwords
+    # [xiaozhi-hub] 支持热词的识别：带上后台维护的热词（配置顶层 asr_hotwords），
+    # 以及呼名里模型的正确名字（如 Claude、DeepSeek）
+    from core.agent.asr_text import effective_hotwords, hotwords_supported
 
+    if hotwords_supported(asr_config):
         asr_config = {**asr_config, "hotwords": effective_hotwords(asr_config, config)}
     new_asr = asr.create_instance(
         asr_type,

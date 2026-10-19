@@ -779,29 +779,116 @@ async function renderLLM(root) {
 
 // ---------- 语音识别 ----------
 
+let asrView = null;  // 正在查看的识别方式：local / doubao
 async function renderASR(root) {
   const d = await api("asr");
-  const m = d.model;
+  const b = d.doubao, lm = d.local.model;
+  if (!asrView) asrView = d.choice === "doubao" ? "doubao" : "local";
+  const tag = (using, ok) => using ? '<span class="pill ok">使用中</span>' : ok ? '<span class="pill">已配置</span>' : '<span class="pill">未配置</span>';
   root.innerHTML = `
-    <div class="page-head"><div><h1>语音识别</h1><p class="sub">把设备说的话转成文字。</p></div>
+    <div class="page-head"><div><h1>语音识别</h1><p class="sub">把设备说的话转成文字。一次只能用一种：本地识别，或者豆包云端识别。</p></div>
       <span class="pill ok">当前：${esc(d.selected)}</span></div>
+    ${d.choice === "other" ? `<div class="banner warn">当前使用的 ${esc(d.selected)} 不在后台管理范围内（可能是手动改了配置文件）。在下面选择一种并使用即可切换。</div>` : ""}
     ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里选的是 ${esc(d.selected)}，但服务仍在使用 ${esc(d.running)}，重启服务后生效。</div>` : ""}
-    <div class="card">
-      <div class="card-head"><h2>${esc(d.selected)}</h2>${m ? `<span class="pill ${m.ok ? "ok" : "err"}">${m.ok ? "模型正常" : "模型异常"}</span>` : ""}</div>
-      <div class="panel">
-        <p style="margin:0 0 14px">${esc(d.label)}</p>
-        <div class="kv" style="grid-template-columns:max-content minmax(0,1fr)">
-          ${d.info.map((i) => `<div class="k">${esc(i.label)}</div><code>${esc(i.value)}</code>`).join("")}
-          ${m ? `<div class="k">模型文件</div><div style="color:${m.ok ? "var(--ok)" : "var(--err)"}">${esc(m.detail)}</div>` : ""}
-        </div>
-      </div>
+    <div class="choices">
+      <button class="choice ${asrView === "local" ? "on" : ""}" data-asr="local">
+        <div class="mark" style="background:var(--accent-soft);color:var(--accent)">本</div>
+        <div><b>本地 X-ASR</b> ${tag(d.choice === "local", d.local.exists && lm && lm.ok)}
+          <small>中英混合，在这台电脑上识别，不需要联网</small></div></button>
+      <button class="choice ${asrView === "doubao" ? "on" : ""}" data-asr="doubao">
+        <div class="mark" style="background:#e0f2fe;color:#0369a1">豆</div>
+        <div><b>豆包流式语音识别</b> ${tag(d.choice === "doubao", b.configured)}
+          <small>火山引擎云端识别，边说边识别；需要开通服务，按用量付费</small></div></button>
     </div>
+    <div class="card panel" id="asr-form"></div>
     ${vadCard(d.vad)}
     ${hotwordsCard(d.hotwords)}
     <div class="card" style="margin-top:16px" id="cor-card"></div>
     ${recentCard(d.recent)}
-    <p class="muted small" style="margin-top:14px">其他语音识别方案暂不支持在后台设置。</p>`;
-  asrChecks = [bindVad(d.vad), bindHotwords(d.hotwords), bindCorrections(d.corrections)];
+    <p class="muted small" style="margin-top:14px">其他语音识别方案（阿里、讯飞、其他本地模型）暂不支持在后台设置。</p>`;
+  let formDirty = () => false;
+  const use = (btn, choice, before) => busy(btn, async () => {
+    try {
+      if (before) await before();
+      const r = await api("asr/use", { choice });
+      toast(r.note, r.failed); page.dirty = null; await openPage("asr", true);
+    } catch (err) { toast(err.message, true); }
+  });
+  const renderForm = () => {
+    const box = $("asr-form");
+    if (asrView === "local") {
+      const using = d.choice === "local";
+      box.innerHTML = !d.local.exists ? '<div class="muted">配置文件里没有 SherpaXASR 条目，请重新运行安装脚本生成配置。</div>' : `
+        <p style="margin:0 0 14px">${esc(d.local.label)}</p>
+        <div class="kv" style="grid-template-columns:max-content minmax(0,1fr)">
+          ${using ? d.info.map((i) => `<div class="k">${esc(i.label)}</div><code>${esc(i.value)}</code>`).join("") : ""}
+          ${lm ? `<div class="k">模型文件</div><div style="color:${lm.ok ? "var(--ok)" : "var(--err)"}">${esc(lm.detail)}</div>` : ""}
+        </div>
+        ${using ? "" : `<div class="actions"><span class="result muted">切换后新连接马上生效，在线设备重新连接后生效。</span>
+          <button class="btn primary" id="local-use" ${lm && lm.ok ? "" : "disabled"}>使用本地 X-ASR</button></div>`}`;
+      formDirty = () => false;
+      if ($("local-use")) $("local-use").onclick = (e) => use(e.target, "local");
+      return;
+    }
+    const using = d.choice === "doubao";
+    box.innerHTML = `
+      ${b.conflict ? `<div class="banner err">配置里已有一个叫 ${esc(b.entry)} 的条目，但不是豆包流式识别，请在配置文件里改名或删掉它。</div>` : ""}
+      <p style="margin:0 0 14px">在<a href="https://console.volcengine.com/speech/service/10038" target="_blank" rel="noopener">火山引擎控制台</a>开通“豆包流式语音识别模型 2.0”后，把密钥填在这里。
+        新版控制台只有一个 API Key；旧版控制台是 APP ID 加 Access Token。</p>
+      <div class="cli-row"><div class="cli-k">控制台版本</div><div>
+        <div class="seg" id="db-auth"><button type="button" data-v="key" class="${b.auth === "key" ? "on" : ""}">新版 · API Key</button>
+          <button type="button" data-v="app" class="${b.auth === "app" ? "on" : ""}">旧版 · APP ID + Access Token</button></div></div></div>
+      <div class="grid2" style="margin-top:6px">
+        <label class="f full" data-auth="key">API Key
+          <input class="in mono" id="db-key" type="password" autocomplete="off"
+            placeholder="${b.key_set ? `已设置 ${esc(b.key_hint)}，输入新值可替换` : "未设置，粘贴后保存"}"></label>
+        <label class="f" data-auth="app">APP ID<input class="in mono" id="db-appid" value="${esc(b.appid)}" placeholder="一串数字"></label>
+        <label class="f" data-auth="app">Access Token
+          <input class="in mono" id="db-token" type="password" autocomplete="off"
+            placeholder="${b.token_set ? `已设置 ${esc(b.token_hint)}，输入新值可替换` : "未设置，粘贴后保存"}"></label>
+      </div>
+      <div class="cli-row" style="margin-top:6px"><div class="cli-k">计费方式</div><div>
+        <div class="seg" id="db-res">${b.resources.map((r) => `<button type="button" data-v="${esc(r.value)}" class="${r.value === b.resource_id ? "on" : ""}">${esc(r.label)}<small>${esc(r.hint)}</small></button>`).join("")}</div>
+        <div class="small muted" style="margin-top:6px">要和控制台里开通的一致，不一致会提示鉴权失败。</div></div></div>
+      <p class="muted small" style="margin:8px 0 0">密钥只保存在这台电脑的配置文件里，页面上只显示首尾 4 位。下面的热词会直接带给豆包；识别后纠错照常生效。</p>
+      <div class="actions"><span class="result" id="db-result"></span>
+        <button class="btn" id="db-test">测试连接</button>
+        <button class="btn ${using ? "primary" : ""}" id="db-save">保存</button>
+        ${using ? "" : '<button class="btn primary" id="db-use">保存并使用</button>'}</div>`;
+    const seg = (id) => ($(id).querySelector(".on") || {}).dataset?.v || "";
+    const syncAuth = () => box.querySelectorAll("[data-auth]").forEach((el) => el.classList.toggle("hidden", el.dataset.auth !== seg("db-auth")));
+    box.querySelectorAll(".seg button").forEach((x) => (x.onclick = () => {
+      x.parentElement.querySelectorAll("button").forEach((y) => y.classList.toggle("on", y === x));
+      syncAuth();
+    }));
+    syncAuth();
+    const values = () => ({ auth: seg("db-auth"), api_key: $("db-key").value.trim(), appid: $("db-appid").value.trim(),
+      access_token: $("db-token").value.trim(), resource_id: seg("db-res") });
+    formDirty = snapshot(values);
+    const result = (html) => ($("db-result").innerHTML = html);
+    const bad = (msg) => result(`<span style="color:var(--err)">${esc(msg)}</span>`);
+    $("db-test").onclick = (e) => busy(e.target, async () => {
+      result('<span class="muted">正在连接豆包识别服务…</span>');
+      try {
+        const r = await api("asr/doubao/test", values());
+        result(`<span style="color:var(--ok)">✓ 连接正常，${r.seconds < 1 ? "不到 1 秒" : r.seconds + " 秒"}收到回应</span>`);
+      } catch (err) { bad(err.message); }
+    });
+    $("db-save").onclick = (e) => busy(e.target, async () => {
+      try { const r = await api("asr/doubao", values()); toast(r.changed.length ? r.note : "没有修改", r.failed); page.dirty = null; await openPage("asr", true); }
+      catch (err) { bad(err.message); }
+    });
+    if ($("db-use")) $("db-use").onclick = (e) => use(e.target, "doubao", () => api("asr/doubao", values()));
+  };
+  root.querySelectorAll("[data-asr]").forEach((x) => (x.onclick = () => {
+    if (x.dataset.asr === asrView) return;
+    if (formDirty() && !confirm("这里的修改还没保存，确定切换吗？")) return;
+    asrView = x.dataset.asr;
+    root.querySelectorAll("[data-asr]").forEach((y) => y.classList.toggle("on", y === x));
+    renderForm();
+  }));
+  renderForm();
+  asrChecks = [() => formDirty(), bindVad(d.vad), bindHotwords(d.hotwords), bindCorrections(d.corrections)];
   page.dirty = () => asrChecks.some((f) => f && f());
   bindRecent(root);
 }
@@ -836,9 +923,10 @@ function hotwordsCard(h) {
           写原本的大小写，一个词一项，不要太多（几十个以内），太多反而容易误认。</p>
         <div class="chips" id="hw-chips"></div>
         ${h.auto.length ? `<p class="muted small" style="margin:10px 0 0">虚线的来自<a href="#calls">呼名</a>里的模型名字，自动带上，在呼名页修改。</p>` : ""}
+        ${h.dropped.length ? `<div class="banner warn" style="margin:10px 0 0">豆包一次最多带约 100 个 token 的热词，超出了，这 ${h.dropped.length} 个不会带上：${esc(h.dropped.join("、"))}。呼名里的模型名字会优先带上。</div>` : ""}
         <div style="display:flex;gap:8px;margin-top:12px;max-width:440px">
           <input class="in" id="hw-new" placeholder="添加热词，回车确认" ${h.supported ? "" : "disabled"}><button class="btn sm" id="hw-add" ${h.supported ? "" : "disabled"}>添加</button></div>
-        <div class="actions"><span class="result muted">${h.supported ? "保存后重新加载语音识别（约 1 秒）：新连接马上生效，在线设备重新连接后生效。" : "当前语音识别不支持热词，支持的有 X-ASR、Fun-ASR-Nano、Qwen3-ASR。"}</span>
+        <div class="actions"><span class="result muted">${h.supported ? "保存后重新加载语音识别：新连接马上生效，在线设备重新连接后生效。" : "当前语音识别不支持热词，支持的有本地 X-ASR、豆包。"}</span>
           <button class="btn primary" id="hw-save" ${h.supported ? "" : "disabled"}>保存热词</button></div>
       </div>
     </div>`;
