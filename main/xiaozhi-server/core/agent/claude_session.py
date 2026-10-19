@@ -58,7 +58,10 @@ GLOB_META = re.compile(r"[*?\[{]")
 
 def _escapes_root(root: str, value: str) -> bool:
     target = os.path.realpath(os.path.join(root, os.path.expanduser(value)))
-    return os.path.commonpath([root, target]) != root
+    try:
+        return os.path.commonpath([root, target]) != root
+    except ValueError:  # Windows 上两个路径不在同一个盘
+        return True
 
 
 def _glob_escapes(root: str, pattern: str) -> bool:

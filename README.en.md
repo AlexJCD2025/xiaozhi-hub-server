@@ -72,7 +72,7 @@ When setting up the device's network, enter the OTA address above under "Advance
 ## Security
 
 - Use the server only on your LAN. Do not expose it to the internet.
-- By default Claude Code can only access the working directory `~/xiaozhi-workspace`, with read-only tools. Once you allow writing files or running commands, voice commands can do the same, so be careful.
+- By default Claude Code can only access the working directory `~/xiaozhi-workspace`, with read-only tools. Once you allow writing files or running commands, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
 
 ## Which directories are used
 
