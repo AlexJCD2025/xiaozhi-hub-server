@@ -59,7 +59,7 @@ def test_flow_follows_config(cli_path):
     assert stages["llm"]["module"] == "Claude Code CLI" and "haiku" in stages["llm"]["summary"]
     assert stages["intent"]["module"] == "不用插件"
     assert stages["play"]["module"] == "预缓冲 15 帧" and "0.9" in stages["play"]["summary"]
-    assert "200ms" in stages["listen"]["summary"]  # 上游 SileroVAD 的 min_silence_duration_ms
+    assert "800ms" in stages["listen"]["summary"]  # config.yaml 里 SileroVAD 的 min_silence_duration_ms
     titles = [b["title"] for b in flow["branches"]]
     assert "填充语" in titles and "接续上次对话" in titles and "唤醒词" in titles
     assert [m["type"] for m in flow["messages"]][0] == "stt"
