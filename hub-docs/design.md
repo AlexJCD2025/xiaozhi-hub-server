@@ -45,6 +45,45 @@
 
 ## 2. 一次对话的完整经过
 
+下图按时间顺序画出一次对话里设备、服务端和两类模型之间的往来，编号对应下表的步骤。例子里先交给 Claude Code，再叫 DeepSeek 切过去。
+
+```mermaid
+sequenceDiagram
+    participant D as 设备
+    participant S as 服务端
+    participant C as Claude Code 进程
+    participant A as API 模型
+
+    Note over D,A: 1. 唤醒
+    Note over D: 固件识别"Hi, StackChan"
+    D->>S: 建立 WebSocket 连接
+    D->>S: 唤醒词当作一句话发来
+    S-->>D: 播放缓存的问候，不经过大模型
+
+    Note over D,A: 2. 恢复上次的模型
+    Note over S: 切到这台设备上次用的模型（这里是 Claude Code），不启动进程
+
+    Note over D,A: 4. 第一句话
+    D->>S: 说话
+    S->>C: 启动进程，决定接上旧会话还是新开
+    S->>C: 只发这一句
+    C-->>S: 流式回复
+    S-->>D: 语音
+
+    Note over D,A: 5. 对话中（这句用 3. 叫模型切换）
+    D->>S: "嗨 DeepSeek，……"
+    Note over S: 去掉称呼，切到 DeepSeek 并记住。Claude Code 进程不关，等空闲超时
+    S->>A: 系统提示 + 本次连接里和它的对话 + 这句话
+    A-->>S: 流式回复，这次请求结束
+    S-->>D: 语音
+
+    Note over D,A: 6. 结束
+    Note over D,S: 没人说话、退出指令、设备休眠或断网
+    S--)D: 断开连接
+    S->>C: 通知用过的每个模型，关闭进程（会话留在本机硬盘）
+    Note over S,A: API 模型的对话记录随连接清空
+```
+
 | 步骤 | 谁在做 | 发生什么 |
 | --- | --- | --- |
 | 1. 唤醒 | 设备 → 服务端 | "Hi, StackChan"由设备在固件里识别，服务端听不到这句。设备连上服务端，再把唤醒词当作一句话发过来（StackChan 固定发"嘿，你好呀"）。服务端按 `wakeup_words` 认出是唤醒词，播放缓存的问候，不经过大模型。点屏幕唤醒没有问候，设备直接开始收音。 |
@@ -61,6 +100,33 @@
 ## 3. 一句话的处理流程
 
 一句话从设备的麦克风到设备的喇叭，依次经过下面几步。大部分是上游原有的处理，本项目改动的地方单独标出。
+
+图里橙色边框的是本项目改动或新增的步骤，圆角框是到此为止、不再往下走的情况。
+
+```mermaid
+flowchart TD
+    mic["收音<br/>Opus 每 60ms 一包，解码成 16kHz"] --> vad["语音检测 VAD<br/>安静 800ms 判定这句说完"]
+    vad --> asr["语音识别 X-ASR<br/>按纠错表替换"]
+    asr -->|没有文字| drop(["到此为止"])
+    asr -->|"有文字，发 stt 给设备显示"| route{"呼名、指令"}
+    route -->|嗨 + 称呼| switch["切到对应的模型并记住"]
+    switch -->|只说称呼| ack(["回一声“我在”"])
+    switch -->|带了内容，去掉称呼| intent
+    route -->|退出指令| bye(["断开连接"])
+    route -->|唤醒词| greet(["播放缓存的问候"])
+    route -->|其他| intent["意图识别<br/>nointent 或 function_call"]
+    intent --> llm{"当前模型"}
+    llm -->|API 模型| api["系统提示 + 本次连接的对话 + 这句话<br/>HTTP 流式返回"]
+    llm -->|Claude Code| cc["只发这句话<br/>本机常驻进程"]
+    api --> emo["表情<br/>第一个 emoji 对应成情绪，发 llm 换脸"]
+    cc --> emo
+    emo --> tts["语音合成<br/>边收边切句，逐句合成 Opus"]
+    tts --> play["播放<br/>每句先补缓冲到 15 包，再按 60ms 匀速发<br/>播完发 tts stop"]
+    play -.->|设备回到收音| mic
+
+    classDef hub stroke:#e8590c,stroke-width:3px
+    class vad,asr,route,switch,cc,emo,play hub
+```
 
 | 步骤 | 做什么 | 本项目的改动 |
 | --- | --- | --- |
