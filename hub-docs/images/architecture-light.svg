@@ -31,7 +31,7 @@
 <text x="365.0" y="624.0" text-anchor="middle" font-size="12.5" fill="#64748b">对话记录在连接内存</text>
 <rect x="476" y="560" width="170" height="78" rx="10" fill="#ffffff" stroke="#6366f1" stroke-width="2.5"/>
 <text x="561.0" y="584.0" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">Claude Code 会话</text>
-<text x="561.0" y="604.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#64748b">claude_session.py</text>
+<text x="561.0" y="604.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#64748b">llm/claude_cli</text>
 <text x="561.0" y="624.0" text-anchor="middle" font-size="12.5" fill="#64748b">每轮只发这一句</text>
 <path d="M430 518 V532 H365.0 V560" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ae)"/>
 <path d="M510 518 V532 H561.0 V560" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ae)"/>
