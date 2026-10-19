@@ -136,19 +136,18 @@ else
   mkdir -p "$(dirname "$CONFIG")"
   cp "$ROOT/scripts/config.template.yaml" "$CONFIG"
   chmod 600 "$CONFIG"
-  if [[ -n "$CLAUDE_BIN" ]] && ask "检测到 Claude Code，默认使用它作为大模型？" Y; then
-    info "大模型：ClaudeCLI（本机 Claude Code）"
+  # 本机装了 Claude Code 就直接用它；没装时用管理后台厂商列表里的第一个：Claude API，需要填 API Key
+  if [[ -n "$CLAUDE_BIN" ]]; then
+    info "大模型：本机 Claude Code"
   else
-    # 原项目默认的免费模型；API Key 在管理后台填写
     "$PY" - "$CONFIG" <<'PYEOF'
 import re, sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
-s = re.sub(r"(\n  LLM: )ClaudeCLI[^\n]*", r"\1ChatGLMLLM        # 在管理后台填写 API Key", s, count=1)
-s = re.sub(r"(\n  Intent: )nointent[^\n]*", r"\1function_call", s, count=1)
+s = re.sub(r"(\n  LLM: )ClaudeCLI[^\n]*", r"\1ClaudeAPI          # 在管理后台填写 API Key", s, count=1)
 open(p, "w", encoding="utf-8").write(s)
 PYEOF
-    info "大模型：ChatGLMLLM（智谱 glm-4-flash，需要在管理后台填写 API Key）"
+    info "大模型：Claude API（没找到本机的 Claude Code）。请在管理后台填写 Claude API Key，或者换成别的厂商"
   fi
   info "已生成：$CONFIG"
 fi
@@ -204,7 +203,7 @@ if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
   if bash "$ROOT/scripts/autostart.sh" restart >/dev/null; then info "已开启开机自启，后台服务已重启"; else
     info "已开启开机自启，但后台服务重启失败，请运行 bash \"$ROOT/scripts/autostart.sh\" status 查看"
   fi
-elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" N; then
+elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" Y; then
   if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1
   elif bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
     # 已经开启，只是这次没启动成功（会每 30 秒自动重试）
@@ -217,6 +216,9 @@ else
   info "没有设置。以后想开启：bash \"$ROOT/scripts/autostart.sh\" enable"
 fi
 
+# 用的是 API 模型、还没填 Key 时，提醒去后台填
+LLM_HINT="$(cd "$SERVER" && "$PY" -c 'from core.admin import config_store as c; m = c.load_merged(); n = m["selected_module"]["LLM"]; e = m["LLM"][n]; print(f"\n  大模型 {n} 还没填 API Key：打开管理后台的\"大模型\"页填写后才能对话。" if c.entry_type(m, "LLM") != "claude_cli" and any(c.is_placeholder(e.get(k)) for k in e if c.SECRET_FIELD.search(k)) else "")' 2>/dev/null || true)"
+
 if [[ "$AUTOSTART" == "1" ]]; then
   START_HINT="服务在后台运行，开机登录后会自动启动。查看状态：bash \"$ROOT/scripts/autostart.sh\" status"
 else
@@ -228,7 +230,7 @@ cat <<EOF
 安装完成。安装目录：$ROOT
 
   ${START_HINT}
-  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:${HTTP_PORT}/admin 设置密码。
+  首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:${HTTP_PORT}/admin 设置密码。${LLM_HINT}
   以后更新到最新版本：bash "$ROOT/scripts/update.sh"
 
 提醒：

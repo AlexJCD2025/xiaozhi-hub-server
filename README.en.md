@@ -51,7 +51,7 @@ Requirements:
 - the computer and the device on the same LAN;
 - to use Claude Code, install it first and run `claude` once in a terminal to sign in.
 
-Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login:
+Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login (press Enter to accept):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
