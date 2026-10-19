@@ -645,10 +645,10 @@ async function renderLLM(root) {
       </div>
       <details class="adv"><summary>高级设置（超时、自动接续、当前开放的工具）</summary>
         <div class="grid3">
-          ${num("turn_timeout_seconds", "单轮超时（秒）", "一个任务最长做多久，默认 600")}
-          ${num("stall_timeout_seconds", "无响应超时（秒）", "卡住多久就中断；执行工具时不算")}
-          ${num("idle_timeout_seconds", "空闲关闭进程（秒）")}
-          ${num("resume_window_minutes", "自动接续（分钟）", "这段时间内重连接着聊")}
+          ${num("turn_timeout_seconds", "单轮超时（秒）", "一个任务最长做多久，默认 600，填 0 不限制")}
+          ${num("stall_timeout_seconds", "无响应超时（秒）", "卡住多久就中断；执行工具时不算，填 0 不检查")}
+          ${num("idle_timeout_seconds", "空闲关闭进程（秒）", "填 0 每轮结束就关闭")}
+          ${num("resume_window_minutes", "自动接续（分钟）", "这段时间内重连接着聊，填 0 只在说接续指令时接上")}
           ${num("filler_delay_seconds", "填充语等待（秒）")}
           ${num("progress_interval_seconds", "进度提示间隔（秒）", "第一次提示前等多久，之后逐渐拉长到 4 倍；默认 30，填 0 关闭")}
           <label class="f">进度提示<span class="hint">第一次说这句，之后报已用时间；留空用默认的“还在处理，请稍等”</span>
