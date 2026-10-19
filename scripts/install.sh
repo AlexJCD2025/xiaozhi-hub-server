@@ -197,13 +197,7 @@ PYEOF
 # ---------- 9. 开机自启 ----------
 step "开机自启"
 AUTOSTART=0
-if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
-  # 重新运行安装脚本（例如补装依赖）后，让后台服务用上新装的依赖
-  AUTOSTART=1
-  if bash "$ROOT/scripts/autostart.sh" restart >/dev/null; then info "已开启开机自启，后台服务已重启"; else
-    info "已开启开机自启，但后台服务重启失败，请运行 bash \"$ROOT/scripts/autostart.sh\" status 查看"
-  fi
-elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" Y; then
+enable_autostart() {
   if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1
   elif bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
     # 已经开启，只是这次没启动成功（会每 30 秒自动重试）
@@ -212,6 +206,22 @@ elif ask "是否设置开机自启？（服务在后台运行，开机登录后�
   else
     info "设置失败，可以稍后运行 bash \"$ROOT/scripts/autostart.sh\" enable 重试"
   fi
+}
+# status 的退出码：0 开着且指向这份安装；1 没开；3 开着但指向另一份安装（例如以前装在别的目录）
+AUTOSTART_STATE=0
+bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1 || AUTOSTART_STATE=$?
+if [[ "$AUTOSTART_STATE" == "0" ]]; then
+  # 重新运行安装脚本（例如补装依赖）后，让后台服务用上新装的依赖
+  AUTOSTART=1
+  if bash "$ROOT/scripts/autostart.sh" restart >/dev/null; then info "已开启开机自启，后台服务已重启"; else
+    info "已开启开机自启，但后台服务重启失败，请运行 bash \"$ROOT/scripts/autostart.sh\" status 查看"
+  fi
+elif [[ "$AUTOSTART_STATE" == "3" ]]; then
+  info "$(bash "$ROOT/scripts/autostart.sh" status 2>/dev/null || true)"
+  if ask "开机自启只能有一份。是否改成这一份？（会停掉那份的后台服务）" Y; then enable_autostart
+  else info "保持不变。以后想改成这一份：bash \"$ROOT/scripts/autostart.sh\" enable"; fi
+elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" Y; then
+  enable_autostart
 else
   info "没有设置。以后想开启：bash \"$ROOT/scripts/autostart.sh\" enable"
 fi

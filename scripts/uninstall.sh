@@ -38,8 +38,14 @@ main() {
   confirm "确定卸载？" || { echo "已取消，没有做任何改动。"; exit 0; }
 
   step "取消开机自启"
-  if bash "$root/scripts/autostart.sh" status >/dev/null 2>&1; then
+  local autostart_state=0 autostart_status
+  autostart_status="$(bash "$root/scripts/autostart.sh" status 2>/dev/null)" || autostart_state=$?
+  if [[ "$autostart_state" == "0" ]]; then
     bash "$root/scripts/autostart.sh" disable
+  elif [[ "$autostart_state" == "3" ]]; then
+    # 自启属于另一份安装，不能替它取消
+    info "$autostart_status"
+    info "这份安装没有开机自启，那份的不动"
   else
     info "没有开启开机自启"
   fi
@@ -55,6 +61,13 @@ main() {
       curl -s -m 2 -o /dev/null "http://127.0.0.1:$port/xiaozhi/ota/" || { up=0; break; }
       up=1; sleep 1
     done
+  fi
+  # 占着端口的如果是另一份安装的后台服务（自启属于那份、端口又一样），不是这份的，照常卸载
+  if [[ "$up" == "1" && "$autostart_state" == "3" ]] && command -v lsof >/dev/null 2>&1; then
+    local other_pid listener
+    other_pid="$(printf '%s' "$autostart_status" | sed -n 's/.*（进程 \([0-9][0-9]*\)）.*/\1/p')"
+    listener="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+    [[ -n "$other_pid" && "$listener" == "$other_pid" ]] && up=0
   fi
   if [[ "$up" == "1" ]]; then
     fail "服务还在运行（端口 $port），可能是用 start.sh 手动启动的。请在它的终端按 Ctrl+C 停止后，重新运行本脚本"
