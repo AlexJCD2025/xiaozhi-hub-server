@@ -169,6 +169,23 @@ def test_save_tts_voice(cfg_path):
     assert merged(cfg_path)["TTS"]["EdgeTTS"]["voice"] == "zh-CN-YunxiNeural"
 
 
+def test_save_vad_silence(cfg_path):
+    v = pages.describe_asr(merged(cfg_path))["vad"]
+    assert v["selected"] == "SileroVAD" and v["supported"] and v["silence_ms"] == 200
+    for bad in ("abc", "100", "6000", "1.5"):
+        with pytest.raises(ValueError, match="200～5000"):
+            pages.save_vad_silence(bad, merged(cfg_path), cfg_path)
+    assert pages.save_vad_silence("1000", merged(cfg_path), cfg_path) == 1000
+    assert merged(cfg_path)["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 1000
+    assert pages.save_vad_silence(1000, merged(cfg_path), cfg_path) is None  # 没变不写
+
+
+def test_describe_vad_flags_stream_asr(cfg_path):
+    cfg_path.write_text(CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: AliyunStreamASR\n"),
+                        encoding="utf-8")
+    assert pages.describe_vad(merged(cfg_path))["asr_stream"] is True
+
+
 def test_intent_plugins_keep_manual_extras(cfg_path):
     cfg_path.write_text(CUSTOM_YAML + """Intent:
   function_call:
@@ -386,3 +403,33 @@ async def test_call_names_endpoints_apply_to_online_connections(client):
         learner.stop()
         connections.unregister(fake)
     assert (await client.post("/admin/api/call-names/learn", json={})).status == 400  # 没有设备在线
+
+
+async def test_vad_save_applies_to_running_instances(cfg_path):
+    shared = SimpleNamespace(silence_threshold_ms=200)
+    own = SimpleNamespace(silence_threshold_ms=200)  # 设备有私有配置时，连接用的是自己的实例
+    ws = SimpleNamespace(config_lock=asyncio.Lock(), _vad=shared)
+    running = {"selected_module": {"VAD": "SileroVAD"}, "VAD": {"SileroVAD": {"min_silence_duration_ms": 200}}}
+    app = web.Application()
+    handler = ah.AdminHandler(running, ws_server=ws, config_path=cfg_path)
+    handler.register(app)
+    fake = SimpleNamespace(session_id="s-8", device_id="dev-8", client_ip="x", vad=own,
+                           config={"VAD": {"SileroVAD": {"min_silence_duration_ms": 200}}})
+    connections.register(fake)
+    try:
+        async with TestClient(TestServer(app)) as c:
+            await c.post("/admin/api/setup", json={"password": "pass-1234"})
+            r = await c.post("/admin/api/vad", json={"silence_ms": "6000"})
+            assert r.status == 400 and "200～5000" in (await r.json())["error"]
+            r = await (await c.post("/admin/api/vad", json={"silence_ms": "900"})).json()
+            assert r["note"] == "已保存，马上生效"
+            assert shared.silence_threshold_ms == 900 and own.silence_threshold_ms == 900
+            assert running["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900
+            assert fake.config["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900
+            assert merged(cfg_path)["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900
+            r = await (await c.post("/admin/api/vad", json={"silence_ms": 900})).json()
+            assert r["note"] == "没有修改"
+            await c.post("/admin/api/logout", json={})
+            assert (await c.post("/admin/api/vad", json={"silence_ms": 800})).status == 401
+    finally:
+        connections.unregister(fake)

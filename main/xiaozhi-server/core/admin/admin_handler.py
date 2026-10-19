@@ -68,6 +68,7 @@ class AdminHandler:
                 web.post("/admin/api/llm/use", self.handle_llm_use),
                 web.get("/admin/api/pipeline", self.handle_pipeline),
                 web.get("/admin/api/asr", self.handle_asr),
+                web.post("/admin/api/vad", self.handle_vad_save),
                 web.get("/admin/api/tts", self.handle_tts),
                 web.post("/admin/api/tts", self.handle_tts_save),
                 web.get("/admin/api/tts/preview", self.handle_tts_preview),
@@ -462,6 +463,36 @@ class AdminHandler:
         merged = await self._blocking(self._merged)
         return self._json({"ok": True, **await self._blocking(pages.describe_asr, merged),
                            "running": self._running("ASR")})
+
+    async def handle_vad_save(self, request: web.Request):
+        """保存说完停顿时长。VAD 实例是所有连接共用的，直接改它的阈值，在线设备的下一句话就用上。"""
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            value = await self._blocking(pages.save_vad_silence, body.get("silence_ms"), merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        if value is None:
+            return self._json({"ok": True, "changed": [], "note": "没有修改"})
+        name = merged["selected_module"]["VAD"]
+        self.logger.bind(tag=TAG).info(f"管理后台更新了说完停顿时长: {value}ms")
+        if self._running("VAD") != name:
+            return self._json({"ok": True, "changed": ["silence_ms"], "note": "已保存，重启服务后生效"})
+        self.config.setdefault("VAD", {}).setdefault(name, {})[pages.VAD_SILENCE_FIELD] = value
+        instances = [getattr(self.ws_server, "_vad", None)]
+        for item in connections.snapshot():
+            conn = connections.get(item["session_id"])
+            if conn is None:
+                continue
+            instances.append(getattr(conn, "vad", None))
+            vad_cfg = ((getattr(conn, "config", None) or {}).get("VAD") or {}).get(name)
+            if isinstance(vad_cfg, dict):
+                vad_cfg[pages.VAD_SILENCE_FIELD] = value
+        for vad in instances:
+            if hasattr(vad, "silence_threshold_ms"):
+                vad.silence_threshold_ms = value
+        return self._json({"ok": True, "changed": ["silence_ms"], "note": "已保存，马上生效"})
 
     async def handle_tts(self, request: web.Request):
         self._require_login(request)
