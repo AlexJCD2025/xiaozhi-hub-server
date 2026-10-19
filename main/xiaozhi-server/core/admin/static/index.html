@@ -77,6 +77,7 @@
   .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 13px; }
   .banner.warn { background: var(--warn-soft); color: var(--warn); }
   .banner.err { background: var(--err-soft); color: var(--err); }
+  .banner.ok { background: var(--ok-soft); color: var(--ok); }
   .banner.info { background: var(--accent-soft); color: var(--accent); }
 
   /* 表单 */
@@ -148,7 +149,11 @@
   .vendor small { color: var(--muted); font-size: 12px; }
   .vendor i { position: absolute; top: 12px; right: 12px; width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
   .vendor i.set { background: var(--ok); }
-  .vendor .using { color: var(--accent); font-weight: 600; }
+  .vendor.using { border-color: var(--ok); background: var(--ok-soft); }
+  .vendor.using.on { box-shadow: 0 0 0 3px var(--accent-soft), inset 0 0 0 1px var(--ok); border-color: var(--accent); }
+  .vendor.using small { display: inline-block; margin-top: 2px; padding: 0 8px; border-radius: 999px; background: var(--ok); color: var(--card); font-weight: 600; }
+  .vendor.using i { width: 8px; height: 8px; box-shadow: 0 0 0 3px rgba(5, 150, 105, .18); }
+  .section-title .pill { text-transform: none; letter-spacing: 0; }
 
   /* 状态页 */
   .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
@@ -658,7 +663,7 @@ async function renderLLM(root) {
     ${d.kind === "other" ? `<div class="banner warn">当前使用的 ${esc(d.selected)} 不在后台管理范围内（可能是手动改了配置文件）。在下面选择一种并点"保存并使用"即可切换。</div>` : ""}
     ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里选的是 ${esc(d.selected)}，但服务仍在使用 ${esc(d.running)}。</div>` : ""}
 
-    <div class="section-title">本地 CLI · 使用本机已登录的账号，不需要 Key</div>
+    <div class="section-title">本地 CLI · 使用本机已登录的账号，不需要 Key${usingCli ? ' <span class="pill ok">使用中</span>' : ""}</div>
     <div class="choices">
       <div class="choice ${usingCli ? "on" : ""}">
         <div class="mark" style="background:#fef3c7;color:#b45309">C</div>
@@ -672,6 +677,7 @@ async function renderLLM(root) {
     </div>
     <div class="card panel" id="cli-form">
       ${c.exists ? `
+      ${usingCli ? "" : `<div class="banner info">现在没有使用本地 CLI${active ? `，正在使用 API Key 里的 ${esc(active.label)}` : ""}。这里改的设置要点"保存并使用"才会生效。</div>`}
       <div class="cli-row"><div class="cli-k">模型</div><div>
         <div class="seg" data-k="model">${c.options.model.map((o) => `<button type="button" data-v="${o.value}" class="${o.value === v.model ? "on" : ""}">${o.label}<small>${esc(o.hint)}</small></button>`).join("")}
           <button type="button" data-v="__custom" class="${customModel ? "on" : ""}">自定义<small>填完整模型名</small></button></div>
@@ -717,10 +723,10 @@ async function renderLLM(root) {
       </div>` : '<div class="muted">配置文件里没有 ClaudeCLI 条目，请重新运行安装脚本生成配置。</div>'}
     </div>
 
-    <div class="section-title">API Key · 云端模型，统一走 OpenAI 协议</div>
-    <div class="vendors">${d.vendors.map((x) => `<button class="vendor ${x.id === llmVendor ? "on" : ""}" data-vendor="${x.id}">
+    <div class="section-title">API Key · 云端模型，统一走 OpenAI 协议${active ? ` <span class="pill ok">使用中：${esc(active.label)}</span>` : ""}</div>
+    <div class="vendors">${d.vendors.map((x) => `<button class="vendor ${x.id === llmVendor ? "on" : ""} ${d.vendor === x.id ? "using" : ""}" data-vendor="${x.id}">
       <i class="${x.configured ? "set" : ""}"></i><b>${esc(x.label)}</b>
-      <small class="${d.vendor === x.id ? "using" : ""}">${d.vendor === x.id ? "使用中" : x.configured ? "已配置" : "未配置"}</small></button>`).join("")}</div>
+      <small>${d.vendor === x.id ? "✓ 使用中" : x.configured ? "已配置" : "未配置"}</small></button>`).join("")}</div>
     <div class="card panel" id="api-form"></div>`;
 
   // ----- 本地 CLI -----
@@ -776,6 +782,8 @@ async function renderLLM(root) {
     const x = d.vendors.find((y) => y.id === llmVendor), using = d.vendor === x.id;
     const box = $("api-form");
     box.innerHTML = `
+      ${using ? `<div class="banner ok">✓ 正在使用 ${esc(x.label)} · ${esc(x.model)}。</div>`
+        : `<div class="banner info">${active ? `现在使用的是 ${esc(active.label)}。` : ""}${esc(x.label)} 设置好后点"保存并使用"切换过来。</div>`}
       ${x.conflict ? `<div class="banner err">配置里已有一个叫 ${esc(x.entry)} 的条目，但不是 OpenAI 兼容类型，请在配置文件里改名或删掉它。</div>` : ""}
       ${x.hint ? `<div class="banner info">${esc(x.hint)}</div>` : ""}
       <div class="grid2">
