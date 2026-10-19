@@ -1,4 +1,4 @@
-"""管理后台"工作原理"页：流程按配置生成，提示词拆解的各段和变量标记。全部使用临时配置文件。"""
+"""管理后台"工作原理"页：五步流程和速查卡片按配置生成，提示词拆解的各段和变量标记。全部使用临时配置文件。"""
 
 import re
 from pathlib import Path
@@ -52,44 +52,34 @@ def marks(text):
     return re.findall(f"{pipeline.MARK_START}(\\w+){pipeline.MARK_SEP}", text)
 
 
-def test_flow_follows_config(cli_path):
-    flow = pipeline.describe_flow(merged(cli_path))
-    stages = {s["id"]: s for s in flow["stages"]}
-    assert list(stages) == ["listen", "asr", "intent", "llm", "emotion", "tts", "play"]
-    assert stages["llm"]["module"] == "Claude Code CLI" and "haiku" in stages["llm"]["summary"]
-    assert stages["intent"]["module"] == "不用插件"
-    assert stages["play"]["module"] == "预缓冲 15 帧" and "0.9" in stages["play"]["summary"]
-    assert "800ms" in stages["listen"]["summary"]  # config.yaml 里 SileroVAD 的 min_silence_duration_ms
-    titles = [b["title"] for b in flow["branches"]]
-    assert "填充语" in titles and "接续上次对话" in titles and "唤醒词" in titles
-    assert [m["type"] for m in flow["messages"]][0] == "stt"
+def test_stages_follow_config(cli_path):
+    stages = {s["id"]: s for s in pipeline.describe_flow(merged(cli_path))["stages"]}
+    assert list(stages) == ["listen", "asr", "llm", "tts", "play"]
+    assert stages["listen"]["value"] == "停顿 800ms 算说完"  # config.yaml 里 SileroVAD 的 min_silence_duration_ms
+    assert stages["llm"]["value"] == "Claude Code · Haiku" and stages["llm"]["hint"] == "思考力度：低"
+    assert stages["play"]["value"] == "缓冲约 0.9 秒" and stages["play"]["page"] is None
+    assert {s["page"] for s in stages.values()} == {"asr", "llm", "tts", None}  # 点击跳到对应的设置页
 
 
-def test_timeline_follows_config(cli_path):
-    flow = pipeline.describe_flow(merged(cli_path))
-    steps = {t["title"]: t["items"] for t in flow["timeline"]}
-    assert list(steps) == ["唤醒", "叫模型（可选）", "第一句话", "对话中", "结束"]
-    assert any("Hi, StackChan" in x and "设备自己识别" in x for x in steps["唤醒"])
-    assert any("“我在”" in x for x in steps["叫模型（可选）"])
-    assert any("cloud" in x for x in steps["叫模型（可选）"])  # 列出现在的称呼
-    assert any("2 小时" in x for x in steps["第一句话"])  # resume_window_minutes 默认 120
-    assert not any("API 模型" in x for x in steps["第一句话"])  # 没有叫到 API 模型
-    assert any("5 分钟" in x for x in steps["结束"])  # idle_timeout_seconds 默认 300
-    assert any("2 分钟没人说话" in x for x in steps["结束"])  # close_connection_no_voice_time 默认 120
-    assert any(x.startswith("3 分钟没有任何动静") for x in steps["结束"])  # 第二道：再加 60 秒兜底
-    intent = next(s for s in flow["stages"] if s["id"] == "intent")
-    assert intent["params"][0]["label"] == "呼名" and "只说称呼" in [b["title"] for b in flow["branches"]]
+def test_tips_follow_config(cli_path):
+    tips = {t["title"]: t for t in pipeline.describe_flow(merged(cli_path))["tips"]}
+    assert list(tips) == ["唤醒", "换模型", "打断", "长任务", "接着上次聊", "结束"]
+    assert "“我在”" in tips["换模型"]["result"] and "cloud" in tips["换模型"]["result"]  # 列出现在的称呼
+    assert "10 分钟" in tips["长任务"]["result"] and "30 秒" in tips["长任务"]["result"]
+    assert "2 小时内" in tips["接着上次聊"]["result"] and "“接着上次聊”" in tips["接着上次聊"]["result"]
+    assert "API" not in tips["接着上次聊"]["result"]  # 没有叫到 API 模型
+    assert "“退出”" in tips["结束"]["say"] and "2 分钟没人说话" in tips["结束"]["result"]
 
 
-def test_timeline_with_call_names_disabled_and_api(tmp_path):
+def test_tips_with_call_names_disabled_and_api(tmp_path):
     path = tmp_path / ".config.yaml"
     path.write_text(API_YAML + "\ncall_names:\n  enabled: false\n", encoding="utf-8")
     flow = pipeline.describe_flow(merged(path))
-    steps = {t["title"]: t["items"] for t in flow["timeline"]}
-    assert "叫模型（可选）" not in steps and any("DeepSeek" in x for x in steps["唤醒"])
-    assert any("API 模型" in x for x in steps["第一句话"])
-    assert not any("Claude Code 进程空闲" in x for x in steps["结束"])
-    assert "只说称呼" not in [b["title"] for b in flow["branches"]]
+    tips = {t["title"]: t for t in flow["tips"]}
+    assert "换模型" not in tips and "长任务" not in tips
+    assert "DeepSeek" in tips["唤醒"]["result"]
+    assert "断开后从头开始" in tips["接着上次聊"]["result"]
+    assert next(s for s in flow["stages"] if s["id"] == "llm")["value"] == "DeepSeek"
 
 
 def test_prompt_segments_for_claude_cli(cli_path):
@@ -115,8 +105,6 @@ def test_prompt_segments_for_api_with_plugins(tmp_path):
     tools = next(s for s in p["segments"] if s["id"] == "tools")["text"]
     assert "查天气" in tools and "放音乐" in tools and "热点新闻" not in tools
     assert not any("进程启动时" in w for w in p["warnings"])
-    flow = pipeline.describe_flow(m)
-    assert flow["stages"][2]["module"] == "用插件" and "填充语" not in [b["title"] for b in flow["branches"]]
 
 
 def test_actual_prompt_from_online_device(cli_path):
@@ -138,4 +126,5 @@ async def test_pipeline_endpoint_requires_login(cli_path):
         assert (await c.get("/admin/api/pipeline")).status == 401
         await c.post("/admin/api/setup", json={"password": "pass-1234"})
         data = await (await c.get("/admin/api/pipeline")).json()
-        assert data["ok"] and data["flow"]["stages"] and data["prompt"]["segments"]
+        assert data["ok"] and data["flow"]["stages"] and data["flow"]["tips"] and data["prompt"]["segments"]
+        assert data["design_url"].endswith("hub-docs/design.md")
