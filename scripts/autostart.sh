@@ -151,11 +151,12 @@ esac
 case "${1:-}" in
   enable)
     [[ -x "$SERVER/.venv/bin/python" ]] || fail "还没安装，请先运行：bash \"$ROOT/scripts/install.sh\""
-    # 后台服务读不到"文稿""桌面""下载"和 iCloud 里的文件（macOS 的隐私保护），放在这些目录里会一直启动失败
+    # macOS 的隐私保护默认不让后台服务读"文稿""桌面""下载"和 iCloud 里的文件，放在这些目录里很可能启动失败
     if [[ "$P" == mac ]]; then
       case "$ROOT/" in
         "$HOME/Documents/"* | "$HOME/Desktop/"* | "$HOME/Downloads/"* | "$HOME/Library/Mobile Documents/"*)
-          fail "安装目录在\"文稿/桌面/下载/iCloud\"里，macOS 不允许后台服务读取这些目录。请把 $ROOT 移到别处（例如 ~/xiaozhi-hub-server）后再开启" ;;
+          info "⚠️  安装目录在\"文稿/桌面/下载/iCloud\"里，macOS 默认不允许后台服务读取这些目录，服务很可能启动失败。"
+          info "    启动失败的话，请把 $ROOT 移到别处（例如 ~/xiaozhi-hub-server）后重新开启" ;;
       esac
     fi
     port="$(hub_port)"
