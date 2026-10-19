@@ -334,13 +334,17 @@ function toast(msg, isError) {
   toast.timer = setTimeout(() => (t.className = isError ? "err" : ""), isError ? 6000 : 3000);
 }
 
-async function api(path, body) {
+// quiet：后台定时查询用。登录过期时如果页面上有没保存的修改，不跳到登录页（会清掉这些修改），只抛出错误
+async function api(path, body, quiet) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   let res;
   try { res = await fetch("/admin/api/" + path, opts); } catch (e) { throw new Error("连不上服务，请确认服务还在运行"); }
   let data = {};
   try { data = await res.json(); } catch (e) {}
-  if (res.status === 401 && path !== "login") { page.dirty = null; await route(); throw new Error("登录已过期，请重新登录"); }
+  if (res.status === 401 && path !== "login") {
+    if (quiet && page.dirty && page.dirty()) { const e = new Error(EXPIRED); e.expired = true; throw e; }
+    page.dirty = null; await route(); throw new Error(EXPIRED + "，请重新登录");
+  }
   if (!res.ok || data.ok === false) throw new Error(data.error || ("请求失败：" + res.status));
   return data;
 }
@@ -385,6 +389,7 @@ async function route() {
     return;
   }
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden");
+  expiredWarned = false;
   watchOnline();
   await openPage(currentPage(), true);
 }
@@ -431,16 +436,28 @@ document.querySelectorAll("#nav button").forEach((b) => (b.onclick = () => openP
 window.addEventListener("hashchange", () => openPage(currentPage()));
 window.addEventListener("beforeunload", (e) => { if (page.dirty && page.dirty()) { e.preventDefault(); e.returnValue = ""; } });
 
-// devices 为 null 表示连不上服务：不能停在上一次的结果上，否则服务停了还显示"1 台设备在线"
-function setOnline(devices) {
+// devices 为 null 表示查不到（连不上服务、登录过期）：不能停在上一次的结果上，否则服务停了还显示"1 台设备在线"
+function setOnline(devices, reason = OFFLINE) {
   $("online-dot").classList.toggle("on", !!devices && devices.length > 0);
   $("online-dot").classList.toggle("off", !devices);
-  $("online-text").textContent = !devices ? "连不上服务" : devices.length ? `${devices.length} 台设备在线` : "没有设备在线";
-  $("online-short").textContent = !devices ? "已断开" : devices.length ? `${devices.length} 台` : "无设备";  // 窄屏用
+  $("online-text").textContent = !devices ? reason : devices.length ? `${devices.length} 台设备在线` : "没有设备在线";
+  $("online-short").textContent = !devices ? (reason === OFFLINE ? "已断开" : "需登录") : devices.length ? `${devices.length} 台` : "无设备";  // 窄屏用
   $("online-dot").parentElement.title = $("online-text").textContent;
 }
 const OFFLINE = "连不上服务";  // api() 连不上服务时抛出的错误以这几个字开头
-function onDevicesError(e) { if (String(e && e.message).startsWith(OFFLINE)) setOnline(null); }
+const EXPIRED = "登录已过期";
+const isOffline = (e) => String(e && e.message).startsWith(OFFLINE);
+let expiredWarned = false;
+// 后台定时查询出错时：连不上服务、登录过期（页面上有没保存的修改）都要在侧边栏如实显示
+function onDevicesError(e) {
+  if (isOffline(e)) return setOnline(null);
+  if (!e || !e.expired) return;
+  setOnline(null, EXPIRED);
+  if (!expiredWarned) {
+    expiredWarned = true;
+    toast("登录已过期（服务可能重启过）。页面上还有没保存的修改，保存会失败，请先把它们记下来，再刷新页面重新登录", true);
+  }
+}
 
 // 侧边栏的在线设备数不管在哪一页都要跟着变：登录后每 5 秒查一次。
 // 页面在后台时跳过；状态页、正在录入称呼的呼名页自己会查，这里也跳过，免得重复请求
@@ -448,7 +465,7 @@ let onlineTimer = null;
 function watchOnline() {
   const refresh = async () => {
     if (document.hidden || page.name === "status" || (page.name === "calls" && page.timer)) return;
-    try { setOnline((await api("devices")).devices); } catch (e) { onDevicesError(e); }
+    try { setOnline((await api("devices", undefined, true)).devices); } catch (e) { onDevicesError(e); }
   };
   clearInterval(onlineTimer);
   refresh();
@@ -506,12 +523,20 @@ async function renderStatus(root) {
     const testing = (lastDevices?.devices || []).some((d) => d.emotion_test && d.emotion_test.running);
     if (document.hidden || (!testing && Date.now() - last < 5000)) return;
     last = Date.now();
-    try { const d = await api("devices"); setOnline(d.devices); renderDevices(d); } catch (e) { onDevicesError(e); }
+    try { const d = await api("devices", undefined, true); setOnline(d.devices); renderDevices(d); }
+    catch (e) { onDevicesError(e); if (isOffline(e)) devicesOffline(); }
   }, 1500);
 }
 
 const openEmotion = new Set();  // 展开了表情测试的设备
 let lastDevices = null;  // 最近一次查到的在线设备，状态页据此决定多久再查
+// 连不上服务时不能继续显示上一次的列表，否则侧边栏说"连不上服务"，这里还列着设备
+function devicesOffline() {
+  const box = $("devices");
+  if (!box || box.dataset.key === "offline") return;
+  box.dataset.key = "offline";
+  box.innerHTML = '<div class="panel muted">连不上服务，设备列表暂停更新。服务恢复后会自动刷新。</div>';
+}
 function renderDevices(dev) {
   lastDevices = dev;
   const box = $("devices");
@@ -1317,7 +1342,7 @@ async function renderCallNames(root) {
   const poll = () => {
     clearInterval(page.timer);
     page.timer = setInterval(async () => {
-      try { const r = await api("call-names"); learning = r.learning; devices = r.devices; setOnline(devices); } catch (e) { onDevicesError(e); return; }
+      try { const r = await api("call-names", undefined, true); learning = r.learning; devices = r.devices; setOnline(devices); } catch (e) { onDevicesError(e); return; }
       draw();
       if (!learning.active) { clearInterval(page.timer); page.timer = null; }
     }, 1500);
