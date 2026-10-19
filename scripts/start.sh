@@ -9,6 +9,11 @@ PY="$SERVER/.venv/bin/python"
 
 [[ -x "$PY" ]] || { echo "未找到虚拟环境，请先运行：bash scripts/install.sh" >&2; exit 1; }
 
+# 开机自启（autostart.sh）时，启动失败的报错写在这个文件里；反复启动失败时不让它无限变大
+if [[ -n "${AUTOSTART_ERR_LOG:-}" && -f "$AUTOSTART_ERR_LOG" ]] && (( $(wc -c <"$AUTOSTART_ERR_LOG") > 1048576 )); then
+  : >"$AUTOSTART_ERR_LOG"
+fi
+
 if [[ "${SKIP_DOCTOR:-0}" != "1" ]]; then
   if ! "$PY" "$ROOT/scripts/doctor.py" 2>/dev/null; then
     if [[ -t 0 ]]; then

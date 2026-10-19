@@ -47,18 +47,28 @@
   - 选择语音合成音色并试听，设置意图识别。
   - 查看环境自检、在线设备，给设备发表情测试。
   - "工作原理"页展示一句话从设备到播放的完整流程和发给大模型的提示词。
-- **一键安装和启动**：macOS / Linux 一条命令安装，自动准备 Python 环境、依赖和语音识别模型。
+- **一键安装、自启和更新**：macOS / Linux 一条命令安装，自动准备 Python 环境、依赖和语音识别模型；可选开机自启，一条命令更新到最新版本。
 
 ## 快速开始
 
 需要：macOS 或 Linux（Windows 脚本尚未实测），电脑和设备在同一个局域网。使用 Claude Code 的话，先安装并在终端运行一次 `claude` 登录。
 
+在终端运行这一行，代码会下载到 `~/xiaozhi-hub-server`，然后自动安装。安装结束时会询问是否开机自启：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
+```
+
+不想用 `curl | bash` 的话，也可以手动下载再安装：
+
 ```bash
 git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
 cd xiaozhi-hub-server
 bash scripts/install.sh   # 安装
-bash scripts/start.sh     # 启动
+bash scripts/start.sh     # 启动（没有开启开机自启时）
 ```
+
+以后更新到最新版本：`bash ~/xiaozhi-hub-server/scripts/update.sh`（手动下载的，换成自己的目录）。
 
 启动后终端会显示两个地址：
 
@@ -81,7 +91,7 @@ bash scripts/start.sh     # 启动
 | 目录 / 文件 | 说明 |
 | --- | --- |
 | `main/xiaozhi-server` | **用到**：服务端本体，本项目的改动都在这里 |
-| `scripts/` | **用到**：本项目的安装和启动脚本 |
+| `scripts/` | **用到**：本项目的安装、启动、开机自启和更新脚本 |
 | `hub-docs/`、`README.en.md` | **用到**：本项目的文档（使用说明、设计细节、README 图片）和英文 README |
 | `main/manager-api`、`main/manager-web`、`main/manager-mobile` | 未用到：上游的智控台，本项目用自带的网页管理后台代替 |
 | `main/digital-human` | 未用到：上游的数字人前端 |

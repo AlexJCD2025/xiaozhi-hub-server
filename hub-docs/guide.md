@@ -6,9 +6,19 @@ xiaozhi-hub-server 是小智设备（StackChan、ESP32 开发板等）的**本�
 
 ## 安装与启动
 
-要求：macOS 或 Linux（Windows 脚本 `scripts/install.ps1`、`scripts/start.ps1` 尚未实测），能访问网络。
+要求：macOS 或 Linux（Windows 脚本 `scripts/install.ps1`、`scripts/start.ps1` 尚未实测），能访问网络，已安装 git（macOS 没有时运行 `xcode-select --install`）。
+
+**一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`（想换目录，在命令前加上 `XIAOZHI_HUB_DIR=<目录>`），然后自动运行安装脚本。只下载运行需要的 `main/xiaozhi-server`、`scripts`、`hub-docs`，不下载上游的智控台、数字人等目录和提交历史。
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
+```
+
+**手动安装**：
+
+```bash
+git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
+cd xiaozhi-hub-server
 bash scripts/install.sh
 bash scripts/start.sh
 ```
@@ -16,19 +26,70 @@ bash scripts/start.sh
 安装脚本会准备好运行需要的一切：
 
 - uv（Python 包管理工具）、Python 3.10、opus 和 ffmpeg：电脑上已有就直接用，缺少时先询问再安装；
-- Python 依赖：全部装在项目自己的虚拟环境 `main/xiaozhi-server/.venv` 里，约 550MB，不影响系统里的 Python；
+- Python 依赖：全部装在项目自己的虚拟环境 `main/xiaozhi-server/.venv` 里，约 500MB，不影响系统里的 Python；
 - 语音识别模型：X-ASR 中英混合模型（sherpa-onnx int8 版），约 175MB，从 Hugging Face 下载；国内下载慢时先设置 `HF_ENDPOINT=https://hf-mirror.com` 再运行安装脚本；
 - 配置文件 `main/xiaozhi-server/data/.config.yaml`：检测到本机已安装 Claude Code 时，默认使用 Claude Code 作为大模型；否则使用智谱 glm-4-flash，需要到管理后台填写 API Key。
 
-安装结束和每次启动时都会运行自检，并显示 OTA 地址和管理后台地址。运行内存约 0.9GB。
+安装结束和每次启动时都会运行自检，并显示 OTA 地址和管理后台地址。
+
+**下载量和内存**（2026-10-20 在 macOS 上实测）：
+
+| 项目 | 下载 | 装好后占用硬盘 |
+| --- | --- | --- |
+| 代码（只含运行需要的目录） | 约 21MB | 约 50MB |
+| Python 3.10 | 约 25MB | 约 66MB |
+| Python 依赖（87 个包，最大的是 claude-agent-sdk，约 61MB） | 约 146MB | 约 500MB |
+| 语音识别模型 X-ASR | 约 175MB | 约 175MB |
+| **合计** | **约 370MB** | **约 800MB** |
+
+- 电脑上没有 uv、ffmpeg、opus 时，还要额外下载它们，不算在上表里。
+- uv 会在 `~/.cache/uv` 里留一份 Python 包的缓存（约 500MB），下次安装、更新时直接用，不用重新下载。不需要的话可以运行 `uv cache clean` 删掉。
+- 运行时内存：服务本身约 0.6GB，大部分是语音识别模型。用 Claude Code 对话时，每台连着的设备多一个 Claude Code 进程，约 0.26GB；对话结束、空闲超时后这个进程会退出。
 
 可选环境变量：
 
 | 变量 | 作用 |
 | --- | --- |
 | `UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/` | 使用国内 Python 包镜像 |
+| `HF_ENDPOINT=https://hf-mirror.com` | 使用国内 Hugging Face 镜像下载语音识别模型 |
 | `ASSUME_YES=1` | 非交互安装，所有询问都按默认回答 |
 | `SKIP_DOCTOR=1` | 启动时跳过自检 |
+| `XIAOZHI_HUB_DIR` | 一键安装时的安装目录，默认 `~/xiaozhi-hub-server` |
+
+一键安装时，环境变量要写在 `bash` 前面，例如 `curl -fsSL …/bootstrap.sh | HF_ENDPOINT=https://hf-mirror.com bash`。
+
+### 开机自启
+
+安装结束时会询问是否开机自启。开启后，服务在后台运行，不用开着终端；异常退出时 30 秒后自动重启。以后也可以随时开关：
+
+```bash
+bash scripts/autostart.sh enable    # 开启，并马上在后台启动
+bash scripts/autostart.sh disable   # 关闭，并停止后台服务
+bash scripts/autostart.sh status    # 查看是否在运行
+bash scripts/autostart.sh restart   # 重启后台服务
+```
+
+- **macOS**：用 launchd（`~/Library/LaunchAgents/com.xiaozhi-hub.server.plist`），**登录这个用户后**自动启动。Claude Code 的登录信息存在用户的钥匙串里，所以不能做成登录前就启动的系统服务。想开机就启动，在"系统设置 → 用户与群组"里开启自动登录（开了 FileVault 的电脑不能自动登录）。安装目录不要放在"文稿""桌面""下载"里，后台服务没有权限读这些目录。
+- **Linux**：用 systemd 用户服务（`~/.config/systemd/user/xiaozhi-hub.service`），默认登录后启动。想开机就启动（不用登录），运行 `sudo loginctl enable-linger $USER`。
+- 日志照常在 `main/xiaozhi-server/tmp/server.log`。服务启动失败时，macOS 的报错在 `tmp/autostart-error.log`，Linux 用 `journalctl --user -u xiaozhi-hub` 查看。
+- 开启时会记下当前终端的 PATH，让后台服务能找到 ffmpeg 和 claude。以后 Claude Code 换了安装位置，重新运行一次 `enable` 就行。
+- 开着自启时，不要再手动运行 `start.sh`，否则端口会冲突。想在终端里看实时输出调试，先 `disable`，调试完再 `enable`。
+
+### 更新
+
+```bash
+bash ~/xiaozhi-hub-server/scripts/update.sh
+```
+
+更新脚本会：
+
+1. 从 GitHub 拉取最新代码。配置 `data/.config.yaml`、语音识别模型和虚拟环境都不在 Git 里，不受影响；
+2. 重新运行安装脚本，补装新版本新增的依赖和模型，已有的直接跳过；
+3. 开了开机自启的话，自动重启后台服务。手动启动的服务，在它的终端按 Ctrl+C 停止，再运行 `start.sh`。
+
+如果改过仓库里的文件（例如直接改了 `config.yaml`），更新脚本会列出这些文件并停下，不会覆盖。自己的配置请在管理后台修改，或者写在 `data/.config.yaml` 里。
+
+再次运行一键安装命令也可以：检测到已经安装过，会改为运行更新脚本。
 
 ## 首次配置
 
