@@ -43,7 +43,9 @@ main() {
   fi
 
   # 用 start.sh 手动启动的服务还在跑的话，先让用户停掉，不在它运行时删文件
-  port="$( (cd "$server" && .venv/bin/python -c 'from core.admin import config_store; print(int((config_store.load_merged().get("server") or {}).get("http_port", 8003)))') 2>/dev/null || echo 16688)"
+  # 直接从配置文件读端口，不依赖虚拟环境（虚拟环境坏了也要能卸载）
+  port="$(sed -n 's/^  http_port: *\([0-9][0-9]*\).*/\1/p' "$server/data/.config.yaml" 2>/dev/null | head -1 || true)"
+  port="${port:-16688}"
   # 刚停掉的后台服务退出要一点时间，等最多 10 秒
   local i up=0
   if command -v curl >/dev/null 2>&1; then
