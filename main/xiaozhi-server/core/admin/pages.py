@@ -12,6 +12,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from config.config_loader import get_project_dir
 from core.admin import catalog, config_store
+from core.agent import asr_text
 
 CLAUDE_CLI_ENTRY = "ClaudeCLI"
 CLAUDE_EFFORT_VALUES = {"", "low", "medium", "high", "xhigh", "max"}
@@ -333,7 +334,103 @@ def describe_asr(merged: dict) -> dict:
         "info": info,
         "model": asr_model_check(entry),
         "vad": describe_vad(merged),
+        "hotwords": describe_hotwords(merged),
+        "corrections": describe_corrections(merged),
+        "recent": asr_text.recent(),
     }
+
+
+# ---------- 热词 ----------
+# 支持热词的 sherpa-onnx 模型类型：transducer（X-ASR）解码时给热词加分；funasr_nano / qwen3_asr 把热词写进提示
+HOTWORD_MODEL_TYPES = {"transducer", "funasr_nano", "qwen3_asr"}
+HOTWORD_MAX = 200
+HOTWORD_BAD = re.compile(r"[,，\n\r\t]")
+
+
+def hotwords_supported(entry: dict) -> bool:
+    return entry.get("type") == "sherpa_onnx_local" and entry.get("model_type") in HOTWORD_MODEL_TYPES
+
+
+def describe_hotwords(merged: dict) -> dict:
+    entry = _entry(merged, "ASR", _selected(merged, "ASR"))
+    configured = asr_text._aliases(entry.get("hotwords"))
+    seen = {w.lower() for w in configured}
+    return {
+        "supported": hotwords_supported(entry),
+        "words": configured,
+        "auto": [w for w in asr_text.call_name_hotwords(merged) if w.lower() not in seen],
+    }
+
+
+def save_hotwords(words, merged: dict, path: Path = None) -> list:
+    """把热词整个写进 data/.config.yaml 当前语音识别条目（会覆盖 config.yaml 里的默认列表）。返回修改的字段。"""
+    name = _selected(merged, "ASR")
+    entry = _entry(merged, "ASR", name)
+    if not hotwords_supported(entry):
+        raise ValueError("当前语音识别不支持热词（支持的有 X-ASR、Fun-ASR-Nano、Qwen3-ASR）")
+    if not isinstance(words, list):
+        raise ValueError("热词格式不对")
+    result = []
+    for w in words:
+        w = re.sub(r"\s+", " ", str(w)).strip()
+        if not w:
+            continue
+        if HOTWORD_BAD.search(w) or len(w) > 40:
+            raise ValueError(f"热词“{w}”不能包含逗号或换行，长度不超过 40 个字")
+        if w.lower() not in {x.lower() for x in result}:
+            result.append(w)
+    if len(result) > HOTWORD_MAX:
+        raise ValueError(f"热词最多 {HOTWORD_MAX} 个；太多会让识别变慢，也更容易误认")
+    if result == asr_text._aliases(entry.get("hotwords")):
+        return []
+    with config_store.edit_custom(path) as data:
+        target = data.setdefault("ASR", CommentedMap()).setdefault(name, CommentedMap())
+        target["hotwords"] = CommentedSeq(result)
+    return ["hotwords"]
+
+
+# ---------- 识别后纠错替换 ----------
+
+def describe_corrections(merged: dict) -> list:
+    table = asr_text.corrections_of(merged)
+    return [{"target": str(t), "aliases": asr_text._aliases(v)} for t, v in table.items()]
+
+
+def save_corrections(items, merged: dict, path: Path = None) -> list:
+    """校验后把替换表整个写进 data/.config.yaml 的 asr_corrections。返回修改的字段。"""
+    if not isinstance(items, list):
+        raise ValueError("替换表格式不对")
+    table, owner = {}, {}
+    for item in items:
+        target = re.sub(r"\s+", " ", str((item or {}).get("target") or "")).strip()
+        aliases = [re.sub(r"\s+", " ", a) for a in asr_text._aliases((item or {}).get("aliases"))]
+        if not target and not aliases:
+            continue
+        if not target:
+            raise ValueError(f"“{aliases[0]}”要改成什么？请填写正确写法")
+        if len(target) > 40:
+            raise ValueError(f"正确写法“{target}”太长了，不超过 40 个字")
+        clean = []
+        for a in aliases:
+            if len(a) < 2 or len(a) > 40:
+                raise ValueError(f"认错的写法“{a}”需要 2～40 个字；太短容易误改普通的话")
+            if a.lower() == target.lower():
+                continue  # 和正确写法一样，不用替换
+            other = owner.get(a.lower())
+            if other and other != target:
+                raise ValueError(f"“{a}”同时要改成“{other}”和“{target}”，只能保留一个")
+            owner[a.lower()] = target
+            if a.lower() not in {x.lower() for x in clean}:
+                clean.append(a)
+        if not clean:
+            raise ValueError(f"“{target}”还没有认错的写法")
+        table.setdefault(target, [])
+        table[target] += [a for a in clean if a.lower() not in {x.lower() for x in table[target]}]
+    if table == {t: list(v) for t, v in asr_text.corrections_of(merged).items()}:
+        return []
+    with config_store.edit_custom(path) as data:
+        data["asr_corrections"] = CommentedMap((t, CommentedSeq(v)) for t, v in table.items())
+    return ["asr_corrections"]
 
 
 # ---------- 说完停顿时长（VAD） ----------
