@@ -318,6 +318,12 @@ class ClaudeSession(AgentSession):
                                     yield TextDelta("。")
                                 last_char = block.text[-1]
                                 yield TextDelta(block.text)
+                    if last_char and last_char not in SENTENCE_END and any(
+                            isinstance(b, ToolUseBlock) for b in msg.content):
+                        # 过渡语没有句末标点（如"我先看一下文件""我跑一下这个命令："）就去调用工具了：补一个句号，
+                        # TTS 才会马上念出来；否则要等工具跑完、下一段话来了才念，期间也插不进进度提示
+                        last_char = "。"
+                        yield TextDelta("。")
                     streamed = False
                 elif isinstance(msg, ResultMessage):
                     if msg.session_id:
