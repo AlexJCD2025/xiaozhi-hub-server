@@ -1065,11 +1065,12 @@ function vadCard(v) {
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h2>说完停顿多久算一句</h2><span class="pill ok">${esc(v.selected)} · ${v.silence_ms}ms</span></div>
       ${v.asr_stream ? `<div class="banner warn">当前是流式识别，由识别服务自己断句，这里的设置不起作用。</div>` : ""}
+      ${v.asr_doubao ? `<div class="banner info">豆包由识别服务断句，也按这个时长判断一句话说完。</div>` : ""}
       <div class="panel ${v.supported ? "" : "disabled-area"}">
         <p style="margin:0 0 14px">说话中间停顿超过这个时长，就当这句话说完了，发给大模型。经常话没说完就被打断，就调大一些；调大后每句话说完要多等这么久才回复。</p>
         <label class="f">停顿时长（毫秒）<span class="hint">${low}～${high}，一般 800～1200 比较合适</span>
           <input class="in" id="vad-silence" value="${esc(v.silence_ms)}" inputmode="numeric" ${v.supported ? "" : "disabled"}></label>
-        <div class="actions"><span class="result muted">${v.supported ? "保存后马上生效，在线设备不用重新连接。只对非流式识别生效。" : "后台只支持设置 SileroVAD 的停顿时长。"}</span>
+        <div class="actions"><span class="result muted">${v.supported ? "保存后马上生效，在线设备不用重新连接。本地识别和豆包都按这个时长判断。" : "后台只支持设置 SileroVAD 的停顿时长。"}</span>
           <button class="btn primary" id="vad-save" ${v.supported ? "" : "disabled"}>保存</button></div>
       </div>
     </div>`;

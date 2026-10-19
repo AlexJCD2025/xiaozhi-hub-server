@@ -129,6 +129,13 @@ def initialize_asr(config):
 
     if hotwords_supported(asr_config):
         asr_config = {**asr_config, "hotwords": effective_hotwords(asr_config, config)}
+    # [xiaozhi-hub] 豆包流式识别自己判断一句话说完：用后台"说完停顿多久算一句"的时长。
+    # 上游写死 200ms，说话中间稍一停顿就会被截成半句
+    if asr_config.get("type") == "doubao_stream":
+        vad_name = (config.get("selected_module") or {}).get("VAD")
+        silence = ((config.get("VAD") or {}).get(vad_name) or {}).get("min_silence_duration_ms")
+        if silence:
+            asr_config = {**asr_config, "end_window_size": max(200, int(silence))}
     new_asr = asr.create_instance(
         asr_type,
         asr_config,

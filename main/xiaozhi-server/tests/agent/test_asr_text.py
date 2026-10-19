@@ -67,6 +67,8 @@ def test_hotwords_of_shared_legacy_default():
     # 顶层的 asr_hotwords 优先，清空后也不再用默认的
     assert asr_text.hotwords_of({**legacy, "asr_hotwords": ["Docker"]}) == ["Docker"]
     assert asr_text.hotwords_of({"asr_hotwords": []}) == []
+    # 别的条目带的 hotwords 不算
+    assert asr_text.hotwords_of({"ASR": {"Other": {"type": "doubao_stream", "hotwords": ["x"]}}}) == asr_text.DEFAULT_HOTWORDS
 
 
 def test_effective_hotwords_merge_dedupe():

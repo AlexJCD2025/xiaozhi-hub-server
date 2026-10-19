@@ -47,3 +47,55 @@ def test_initialize_asr_passes_shared_hotwords():
               "asr_hotwords": ["StackChan"], "call_names": {"models": {"ClaudeCLI": ["cloud"]}}}
     asr = initialize_asr(config)
     assert asr.hotwords == ["Claude", "StackChan"]  # 呼名的模型名在前
+    assert asr.end_window_size == 200  # 没有 VAD 配置时用条目里的值
+
+
+def test_end_window_follows_vad_silence():
+    """判停时长跟后台"说完停顿多久算一句"一致，不用上游写死的 200ms。"""
+    config = {"selected_module": {"ASR": "DoubaoStreamASRV2", "VAD": "SileroVAD"},
+              "ASR": {"DoubaoStreamASRV2": {**UPSTREAM, "api_key": "k", "end_window_size": 200}},
+              "VAD": {"SileroVAD": {"type": "silero", "min_silence_duration_ms": 1000}}}
+    asr = initialize_asr(config)
+    assert asr.end_window_size == 1000 and asr.construct_request("r")["request"]["end_window_size"] == 1000
+
+
+async def test_check_connection_against_local_server(monkeypatch):
+    """测试连接：Key 对时通过；被拒绝（401）、初始化返回错误、连不上时给出能看懂的原因。"""
+    import websockets
+
+    init_reply = {"code": None}
+
+    def reply(payload: dict) -> bytes:
+        data = json.dumps(payload).encode()
+        return bytes([0x11, 0x91, 0x10, 0x00]) + (1).to_bytes(4, "big") + len(data).to_bytes(4, "big") + data
+
+    def error_reply(code: int) -> bytes:
+        data = json.dumps({"error": "bad resource"}).encode()
+        return bytes([0x11, 0xF0, 0x10, 0x00]) + code.to_bytes(4, "big") + len(data).to_bytes(4, "big") + data
+
+    def check_auth(connection, request):
+        if request.headers.get("X-Api-Key") != "good":
+            return connection.respond(401, '{"error":"Invalid X-Api-Key"}')
+
+    async def handler(ws):
+        await ws.recv()
+        await ws.send(error_reply(init_reply["code"]) if init_reply["code"] else reply({"result": {"text": ""}}))
+
+    async with websockets.serve(handler, "127.0.0.1", 0, process_request=check_auth) as server:
+        port = server.sockets[0].getsockname()[1]
+        init = doubao_stream.ASRProvider.__init__
+
+        def local(self, *a, **k):
+            init(self, *a, **k)
+            self.ws_url = f"ws://127.0.0.1:{port}"
+        monkeypatch.setattr(doubao_stream.ASRProvider, "__init__", local)
+
+        assert (await doubao_stream.check_connection({**UPSTREAM, "api_key": "good"}))["ok"] is True
+        r = await doubao_stream.check_connection({**UPSTREAM, "api_key": "wrong"})
+        assert r["ok"] is False and "鉴权失败（401）" in r["error"] and "Invalid X-Api-Key" in r["error"]
+        init_reply["code"] = 45000001
+        r = await doubao_stream.check_connection({**UPSTREAM, "api_key": "good"})
+        assert r["ok"] is False and "45000001" in r["error"]
+
+    r = await doubao_stream.check_connection({**UPSTREAM, "api_key": "good"}, timeout=2)  # 服务已关闭
+    assert r["ok"] is False and "连不上" in r["error"]

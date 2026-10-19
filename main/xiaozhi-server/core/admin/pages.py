@@ -549,7 +549,7 @@ def save_corrections(items, merged: dict, path: Path = None) -> list:
 
 # ---------- 说完停顿时长（VAD） ----------
 # 服务端 VAD 安静超过这么久就判定一句话说完，交给语音识别。
-# 流式识别（type 以 _stream 结尾）由识别服务自己断句，这个设置对它不起作用。
+# 流式识别（type 以 _stream 结尾）由识别服务自己断句：豆包会用这个时长（end_window_size），其他的不起作用。
 VAD_SILENCE_FIELD = "min_silence_duration_ms"
 VAD_SILENCE_RANGE = (200, 5000)
 
@@ -563,7 +563,8 @@ def describe_vad(merged: dict) -> dict:
         "supported": entry.get("type") == "silero",
         "silence_ms": int(entry.get(VAD_SILENCE_FIELD) or 1000),
         "range": list(VAD_SILENCE_RANGE),
-        "asr_stream": str(asr.get("type") or "").endswith("_stream"),
+        "asr_stream": str(asr.get("type") or "").endswith("_stream") and asr.get("type") != "doubao_stream",
+        "asr_doubao": asr.get("type") == "doubao_stream",
     }
 
 
