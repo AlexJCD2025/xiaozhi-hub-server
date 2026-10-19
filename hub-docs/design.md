@@ -28,10 +28,54 @@
 
 ## 1. 三方和两段关系
 
-```
-设备（StackChan）  ⇄  本地服务端（本项目）  ⇄  大模型
-        WebSocket 长连接             API 模型：每句话一次 HTTP 请求
-                                     Claude Code：本机常驻进程，通过进程的输入输出通信
+下图是三方之间的连接、服务端内部的主要模块，以及状态存在哪。橙色边框是本项目新增的模块，圆柱是保存状态的地方（哪些重启后还在，见 [§11](#11-什么保存什么不保存)）。
+
+```mermaid
+flowchart TB
+    dev["小智设备<br/>StackChan 等"]
+    browser["浏览器"]
+
+    subgraph hub["本机：xiaozhi-hub-server（main/xiaozhi-server）"]
+        http["HTTP 服务：OTA、管理后台<br/>core/http_server.py、core/admin/"]
+        ws["WebSocket 连接<br/>core/connection.py"]
+        asr["语音检测、语音识别<br/>core/providers/vad、asr"]
+        asrtext["热词、纠错<br/>core/agent/asr_text.py"]
+        callname["呼名<br/>core/agent/call_names.py"]
+        router["多模型路由<br/>core/agent/llm_router.py"]
+        apillm["API 模型<br/>core/providers/llm/openai 等"]
+        cli["Claude Code 会话<br/>core/providers/llm/claude_cli<br/>core/agent/claude_session.py"]
+        tts["表情、语音合成<br/>core/providers/tts"]
+        mem[("连接内存<br/>API 模型的对话记录<br/>当前模型、用过的实例")]
+        store[("data/agent_sessions.json<br/>上次用的模型、Claude 会话 ID")]
+        cfg[("data/.config.yaml<br/>全部设置")]
+
+        ws --> asr --> asrtext --> callname --> router
+        router --> apillm
+        router --> cli
+        apillm --> tts
+        cli --> tts
+        tts --> ws
+        router -.- mem
+        router -.- store
+        cli -.- store
+        http -.- cfg
+    end
+
+    vendor["模型厂商 API<br/>DeepSeek、通义千问等"]
+    cc["Claude Code 进程<br/>本机常驻"]
+    ccs[("Claude Code 的会话<br/>本机硬盘")]
+    anthropic["Anthropic"]
+
+    dev <==>|WebSocket 长连接| ws
+    dev -->|配网时取连接地址| http
+    browser -->|管理后台| http
+    apillm -->|每句话一次 HTTP 请求| vendor
+    cli <-->|进程的输入输出| cc
+    cc --> anthropic
+    cc -.- ccs
+
+    classDef hubnew stroke:#e8590c,stroke-width:3px
+    class asrtext,callname,router,cli hubnew
 ```
 
 两段关系的性质完全不同：
