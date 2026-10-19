@@ -1,6 +1,28 @@
-# xiaozhi-hub-server
+<p align="center">
+  <picture>
+    <source srcset="docs/hub/logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/hub/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="docs/hub/logo-light.svg" alt="xiaozhi-hub-server">
+  </picture>
+</p>
+<p align="center">让小智设备用语音指挥你电脑上的 Claude Code 和大模型。</p>
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10-3776ab?style=flat-square" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-64748b?style=flat-square" />
+  <a href="https://github.com/justhalfbit/xiaozhi-hub-server/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="README.md">简体中文</a> |
+  <a href="README.en.md">English</a>
+</p>
+<p align="center">
+  <a href="docs/hub-server.md">使用说明</a> · <a href="DESIGN.md">设计细节</a>
+</p>
 
-[使用说明](docs/hub-server.md) · [设计细节](DESIGN.md)
+[![管理后台](docs/hub/admin.png)](docs/hub-server.md)
+
+---
 
 小智设备（M5Stack StackChan、ESP32 开发板等）的**本地中枢服务端**：设备负责听和说，服务端运行在你自己的电脑上，把语音交给本机的 Claude Code 或你选择的大模型来思考和执行。
 
@@ -58,7 +80,7 @@ bash scripts/start.sh     # 启动
 | --- | --- |
 | `main/xiaozhi-server` | **用到**：服务端本体，本项目的改动都在这里 |
 | `scripts/` | **用到**：本项目的安装和启动脚本 |
-| `docs/hub-server.md`、`DESIGN.md` | **用到**：本项目的使用说明和设计细节 |
+| `docs/hub-server.md`、`docs/hub/`、`DESIGN.md`、`README.en.md` | **用到**：本项目的使用说明、README 图片、设计细节和英文 README |
 | `main/manager-api`、`main/manager-web`、`main/manager-mobile` | 未用到：上游的智控台，本项目用自带的网页管理后台代替 |
 | `main/digital-human` | 未用到：上游的数字人前端 |
 | `main/README.md`、`main/README_en.md`、`docs/` 下的其他文档 | 未用到：上游的说明文档，部分内容不适用于本项目 |
