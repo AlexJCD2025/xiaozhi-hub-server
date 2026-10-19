@@ -812,6 +812,37 @@ def test_abort_closes_stuck_turn(provider):
     assert agent.interrupts == 1 and agent.closed
 
 
+def test_abort_ends_turn_immediately_even_if_claude_ignores_it(provider):
+    """点屏幕打断后，这一轮马上结束：不再保活连接，用户开口说下一句后也不会再冒出"还在处理""做得太久"。
+    原来要等 Claude 自己结束；它卡住不理中断时，会一直等到单轮超时。"""
+    from core.agent.agent_session import Activity
+    provider.filler, provider.turn_timeout, provider.stall_timeout = "", 4, 30
+    provider.abandon_grace, provider.progress_interval = 0.3, 2.5
+    FakeAgent.script = [[Activity("x", tools_running=1), 60.0, Done()]]  # 在跑慢命令，而且不理会中断
+    c = conn()
+    c.client_abort = False
+    provider.on_conn_open(c)
+    said, ended = [], threading.Event()
+
+    def consume():  # 模拟 conn.chat：打断后就不再把文字送去 TTS
+        for piece in provider.response(c.session_id, [{"role": "user", "content": "跑个长命令"}]):
+            said.append(piece)
+            if c.client_abort:
+                break
+        ended.set()
+
+    threading.Thread(target=consume, daemon=True).start()
+    time.sleep(0.5)
+    c.client_abort = True  # 点屏幕打断
+    provider.abort(c)
+    assert ended.wait(1), "打断后这一轮没有马上结束"
+    c.client_abort = False  # 用户接着说了下一句
+    alive_at = c.last_activity_time
+    time.sleep(3)
+    assert said == [] and c.last_activity_time == alive_at  # 没有再说话，也不再刷新连接的活动时间
+    assert FakeAgent.instances[0].interrupts >= 1 and FakeAgent.instances[0].closed  # 卡死的进程被强制关闭
+
+
 def test_abort_after_turn_keeps_process(provider):
     c = conn()
     provider.on_conn_open(c)
