@@ -431,11 +431,11 @@ function setOnline(devices) {
 }
 
 // 侧边栏的在线设备数不管在哪一页都要跟着变：登录后每 5 秒查一次。
-// 页面在后台时跳过；状态页自己会查（顺带刷新设备列表），这里也跳过，免得重复请求
+// 页面在后台时跳过；状态页、正在录入称呼的呼名页自己会查，这里也跳过，免得重复请求
 let onlineTimer = null;
 function watchOnline() {
   const refresh = async () => {
-    if (document.hidden || page.name === "status") return;
+    if (document.hidden || page.name === "status" || (page.name === "calls" && page.timer)) return;
     try { setOnline((await api("devices")).devices); } catch (e) {}
   };
   clearInterval(onlineTimer);
