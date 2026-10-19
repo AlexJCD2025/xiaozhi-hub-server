@@ -50,6 +50,16 @@ VOICE_RULES = f"""
 """
 
 SENTENCE_ENDS = "。！？!?.;；~～…"
+DEFAULT_PROGRESS_REPLY = "还在处理，请稍等"
+PROGRESS_MAX_FACTOR = 4  # 进度提示的间隔逐次翻倍，最多拉长到 4 倍（默认 30 → 60 → 120 秒）
+
+
+def elapsed_text(seconds: float) -> str:
+    """把已用时间说成口语：95 秒 → "1 分半"，185 秒 → "3 分钟"。"""
+    minutes, rest = divmod(int(seconds), 60)
+    if minutes == 0:
+        return f"{rest} 秒"
+    return f"{minutes} 分半" if rest >= 30 else f"{minutes} 分钟"
 
 COMMON_CLI_PATHS = [
     "~/.claude/local/claude",
@@ -138,9 +148,11 @@ class LLMProvider(LLMProviderBase):
         # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住。
         # 工具执行期间（例如跑一条很慢的命令）不算，只受单轮超时限制
         self.stall_timeout = _num(config, "stall_timeout_seconds", 30) or float("inf")
-        # 干活期间这么久没开口，就说一句进度，让人知道还在做；填 0 关闭
+        # 干活期间这么久没开口，就说一句进度，让人知道还在做；填 0 关闭。之后间隔逐渐拉长（见 _progress_gap），并报已用时间
         self.progress_interval = _num(config, "progress_interval_seconds", 30)
-        self.progress_reply = single_sentence(config.get("progress_reply") or "还在处理，请稍等")
+        self.progress_reply = single_sentence(config.get("progress_reply") or DEFAULT_PROGRESS_REPLY)
+        # 第二次起的提示："还在处理，已经 3 分钟了"。自定义了提示语时用它开头
+        self.progress_prefix = "还在处理" if not config.get("progress_reply") else self.progress_reply.rstrip("。")
         self.idle_timeout = _num(config, "idle_timeout_seconds", 300)  # 0：每轮结束就关闭进程
         self.resume_window = _num(config, "resume_window_minutes", 120)  # 0：不自动接续
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
@@ -385,6 +397,7 @@ class LLMProvider(LLMProviderBase):
         last_spoken_at = t0       # 上一次说话（填充语、正式回复、进度提示）的时间
         tail = ""                 # 已说出的最后一个字，判断能不能在这里插一句进度
         tools_running = 0
+        progress_count = 0        # 这一轮已经说了几次进度
         first_at = None
         filler_sent = False
         emotion_buf = ""          # 填充语之后，正式回复开头的几个字，用来找表情
@@ -401,9 +414,12 @@ class LLMProvider(LLMProviderBase):
                         filler_sent = True
                         last_spoken_at, tail = time.time(), self.filler[-1]
                         yield f"😶{self.filler}"
-                    elif self._progress_due(last_spoken_at, tail, first_at is not None or filler_sent):
-                        notice = self._before_notice(tail, first_at is not None or filler_sent) + self.progress_reply
-                        last_spoken_at, tail = time.time(), self.progress_reply[-1]
+                    elif self._progress_due(last_spoken_at, tail, first_at is not None or filler_sent, progress_count):
+                        text = self.progress_reply if progress_count == 0 else \
+                            f"{self.progress_prefix}，已经 {elapsed_text(time.time() - t0)}了。"
+                        notice = self._before_notice(tail, first_at is not None or filler_sent) + text
+                        progress_count += 1
+                        last_spoken_at, tail = time.time(), text[-1]
                         yield notice
                     stalled = not tools_running and time.time() - last_event_at >= self.stall_timeout
                     if elapsed >= self.turn_timeout or stalled:
@@ -478,11 +494,16 @@ class LLMProvider(LLMProviderBase):
             return "😶"
         return "" if not tail or tail in SENTENCE_ENDS or tail in textUtils.EMOJI_MAP else "。"
 
-    def _progress_due(self, last_spoken_at: float, tail: str, spoke: bool) -> bool:
+    def _progress_gap(self, count: int) -> float:
+        """第 count+1 次进度提示前要等多久：每次翻倍，最多拉长到 PROGRESS_MAX_FACTOR 倍。
+        默认依次在第 30、90、210、330… 秒提示，10 分钟的任务说 6 次，而不是每 30 秒一次说 20 次。"""
+        return self.progress_interval * min(2 ** count, PROGRESS_MAX_FACTOR)
+
+    def _progress_due(self, last_spoken_at: float, tail: str, spoke: bool, count: int = 0) -> bool:
         """该不该说一句进度：超过间隔没开口，而且上一句已经说完（不在半句话中间插话）。"""
         if not self.progress_reply or not self.progress_interval:
             return False
-        if time.time() - last_spoken_at < self.progress_interval:
+        if time.time() - last_spoken_at < self._progress_gap(count):
             return False
         return not spoke or not tail or tail in SENTENCE_ENDS or tail in textUtils.EMOJI_MAP
 

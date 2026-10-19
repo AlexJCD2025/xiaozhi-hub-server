@@ -650,8 +650,8 @@ async function renderLLM(root) {
           ${num("idle_timeout_seconds", "空闲关闭进程（秒）")}
           ${num("resume_window_minutes", "自动接续（分钟）", "这段时间内重连接着聊")}
           ${num("filler_delay_seconds", "填充语等待（秒）")}
-          ${num("progress_interval_seconds", "进度提示间隔（秒）", "干活时这么久没开口就说一句，默认 30，填 0 关闭")}
-          <label class="f">进度提示<span class="hint">留空用默认的“还在处理，请稍等”</span>
+          ${num("progress_interval_seconds", "进度提示间隔（秒）", "第一次提示前等多久，之后逐渐拉长到 4 倍；默认 30，填 0 关闭")}
+          <label class="f">进度提示<span class="hint">第一次说这句，之后报已用时间；留空用默认的“还在处理，请稍等”</span>
             <input class="in" data-k="progress_reply" value="${esc(v.progress_reply || "")}" placeholder="还在处理，请稍等"></label>
           <label class="f full">接续关键字<span class="hint">超过自动接续时间后，说这些话会接着上次的对话，用逗号分隔</span>
             <input class="in" data-k="resume_keywords" value="${esc((v.resume_keywords || []).join("，"))}"></label>
