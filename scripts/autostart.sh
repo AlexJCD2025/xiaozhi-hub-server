@@ -4,7 +4,9 @@
 #   enable   设置开机自启，并马上在后台启动服务
 #   disable  取消开机自启，并停止后台服务
 #   restart  重启后台服务（更新后、改了需要重启的配置后）
-#   status   查看是否已开启、是否在运行
+#   status   查看是否已开启、是否在运行。退出码：0 开着且指向这份安装；1 没开；3 开着但指向另一份安装
+# 一个用户只有一个自启文件。装了好几份时，它只属于最后一次运行 enable 的那份；
+# 别的那份运行 enable 会改成指向自己，disable、restart 不会动不属于自己的自启。
 # macOS 用 launchd（~/Library/LaunchAgents），登录后启动；Linux 用 systemd 用户服务。
 # 服务的日志照常写在 main/xiaozhi-server/tmp/server.log。
 set -euo pipefail
@@ -45,6 +47,18 @@ wait_ready() {
 
 xml_escape() { local s="${1//&/&amp;}"; s="${s//</&lt;}"; printf '%s' "${s//>/&gt;}"; }
 
+# 自启文件指向的安装目录（从里面写的 start.sh 路径取出来）
+mac_owner() {
+  local s
+  s="$(sed -n 's#.*<string>\(.*\)/scripts/start\.sh</string>.*#\1#p' "$PLIST" 2>/dev/null | head -n 1 || true)"
+  s="${s//&lt;/<}"; s="${s//&gt;/>}"; printf '%s' "${s//&amp;/&}"
+}
+linux_owner() { sed -n 's#^ExecStart=/bin/bash "\(.*\)/scripts/start\.sh"$#\1#p' "$UNIT_FILE" 2>/dev/null | head -n 1 || true; }
+# 比较前换成真实路径，符号链接、/tmp 和 /private/tmp 这类写法不同也算同一个目录
+canon() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
+# 开着自启，而且指向的就是这份安装
+mine() { "${P}_enabled" && [[ "$(canon "$("${P}_owner")")" == "$(canon "$ROOT")" ]]; }
+
 # ---------- macOS：launchd ----------
 mac_enabled() { [[ -f "$PLIST" ]]; }
 mac_pid() { launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | awk '$1 == "pid" {print $3; exit}'; }
@@ -81,13 +95,29 @@ mac_enable() {
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  mac_bootout
   launchctl enable "gui/$(id -u)/$LABEL"
+  # 刚移除的同名服务偶尔还没完全清掉，注册会报 "Bootstrap failed: 5"，稍等重试
+  local i
+  for ((i = 0; i < 5; i++)); do
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && return 0
+    sleep 1
+  done
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
 }
 
-mac_disable() {
+# 移除服务并等它真正消失（launchd 是异步移除的，马上再注册同名服务会失败）
+mac_bootout() {
+  local i
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  for ((i = 0; i < 20; i++)); do
+    launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+}
+
+mac_disable() {
+  mac_bootout
   rm -f "$PLIST"
 }
 
@@ -160,8 +190,11 @@ case "${1:-}" in
       esac
     fi
     port="$(hub_port)"
-    # 已经开启过的先停掉，再看端口：还被占用说明有手动启动的服务在运行，两个会抢同一个端口
-    if "${P}_enabled"; then "${P}_disable"; fi
+    # 已经开启过的先停掉（包括指向另一份安装的），再看端口：还被占用说明有手动启动的服务在运行，两个会抢同一个端口
+    if "${P}_enabled"; then
+      mine || info "开机自启原来指向另一份安装（$("${P}_owner")），改成指向这一份，并停掉那份的后台服务"
+      "${P}_disable"
+    fi
     if ota_up "$port"; then
       fail "端口 $port 已被占用，可能有用 start.sh 手动启动的服务在运行。请先在它的终端按 Ctrl+C 停止，再开启开机自启"
     fi
@@ -172,11 +205,15 @@ case "${1:-}" in
     wait_ready "$port"
     ;;
   disable)
+    if "${P}_enabled" && ! mine; then
+      fail "开机自启属于另一份安装（$("${P}_owner")），没有改动。要取消，请在那份安装里运行 autostart.sh disable"
+    fi
     "${P}_disable"
     info "已取消开机自启，后台服务已停止"
     ;;
   restart)
     "${P}_enabled" || fail "没有开启开机自启。手动启动的服务请在它的终端按 Ctrl+C 停止，再运行 bash \"$ROOT/scripts/start.sh\""
+    mine || fail "开机自启属于另一份安装（$("${P}_owner")），没有重启。要改成这一份，请运行 bash \"$ROOT/scripts/autostart.sh\" enable"
     "${P}_restart"
     sleep 3  # 让旧进程先退出，免得下面连到的还是旧进程
     wait_ready "$(hub_port)"
@@ -185,6 +222,11 @@ case "${1:-}" in
   status)
     if ! "${P}_enabled"; then echo "未开启开机自启"; exit 1; fi
     pid="$("${P}_pid" || true)"
+    if ! mine; then
+      if [[ -n "$pid" ]]; then echo "开机自启指向另一份安装（$("${P}_owner")），它的服务正在运行（进程 $pid）"
+      else echo "开机自启指向另一份安装（$("${P}_owner")），它的服务没有在运行"; fi
+      exit 3
+    fi
     if [[ -n "$pid" ]]; then echo "已开启开机自启，服务正在运行（进程 $pid）"
     else echo "已开启开机自启，但服务没有在运行。启动失败的原因见 $ERR_LOG 和 $SERVER/tmp/server.log"; fi
     ;;

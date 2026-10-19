@@ -185,6 +185,7 @@ bash scripts/autostart.sh restart   # 重启后台服务
 - 日志照常在 `main/xiaozhi-server/tmp/server.log`。服务启动失败时，macOS 的报错在 `tmp/autostart-error.log`，Linux 用 `journalctl --user -u xiaozhi-hub` 查看。
 - 开启时会记下当前终端的 PATH，让后台服务能找到 ffmpeg 和 claude。以后 Claude Code 换了安装位置，重新运行一次 `enable` 就行。
 - 开着自启时，不要再手动运行 `start.sh`，否则端口会冲突。想在终端里看实时输出调试，先 `disable`，调试完再 `enable`。
+- 一个用户只能有一份安装开机自启。装了好几份（例如换了安装目录）时，开机自启属于最后一次开启它的那一份；在另一份里安装或运行 `enable`，会询问后改成指向那一份，并停掉原来那份的后台服务。`disable`、更新和卸载不会动不属于自己的开机自启。
 
 ### 更新
 
