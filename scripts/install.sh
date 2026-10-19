@@ -189,7 +189,9 @@ AUTOSTART=0
 if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
   # 重新运行安装脚本（例如补装依赖）后，让后台服务用上新装的依赖
   AUTOSTART=1
-  bash "$ROOT/scripts/autostart.sh" restart >/dev/null && info "已开启开机自启，后台服务已重启"
+  if bash "$ROOT/scripts/autostart.sh" restart >/dev/null; then info "已开启开机自启，后台服务已重启"; else
+    info "已开启开机自启，但后台服务重启失败，请运行 bash \"$ROOT/scripts/autostart.sh\" status 查看"
+  fi
 elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" N; then
   if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1; else
     info "设置失败，可以稍后运行 bash \"$ROOT/scripts/autostart.sh\" enable 重试"

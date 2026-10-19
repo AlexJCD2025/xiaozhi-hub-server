@@ -36,7 +36,7 @@ main() {
   new="$(git rev-parse FETCH_HEAD)"
   if [[ "$old" == "$new" ]]; then
     info "已经是最新版本（$(git log -1 --format='%h，%cd' --date=short)）"
-    info "如果上次更新中途失败了，可以运行 bash scripts/install.sh 补装"
+    info "如果上次更新中途失败了，可以运行 bash \"$ROOT/scripts/install.sh\" 补装"
     return
   fi
 
@@ -70,7 +70,7 @@ after_pull() {
   fi
 
   step "补装依赖和模型"
-  HUB_UPDATING=1 bash "$ROOT/scripts/install.sh" || fail "安装步骤失败。按上面的提示处理后，运行 bash scripts/install.sh 补装"
+  HUB_UPDATING=1 bash "$ROOT/scripts/install.sh" || fail "安装步骤失败。按上面的提示处理后，运行 bash \"$ROOT/scripts/install.sh\" 补装"
 
   if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
     step "重启后台服务"
