@@ -644,11 +644,14 @@ async function renderLLM(root) {
       </div>
       <details class="adv"><summary>高级设置（超时、自动接续、当前开放的工具）</summary>
         <div class="grid3">
-          ${num("turn_timeout_seconds", "单轮超时（秒）")}
-          ${num("stall_timeout_seconds", "无响应超时（秒）", "卡住多久就中断")}
+          ${num("turn_timeout_seconds", "单轮超时（秒）", "一个任务最长做多久，默认 600")}
+          ${num("stall_timeout_seconds", "无响应超时（秒）", "卡住多久就中断；执行工具时不算")}
           ${num("idle_timeout_seconds", "空闲关闭进程（秒）")}
           ${num("resume_window_minutes", "自动接续（分钟）", "这段时间内重连接着聊")}
           ${num("filler_delay_seconds", "填充语等待（秒）")}
+          ${num("progress_interval_seconds", "进度提示间隔（秒）", "干活时这么久没开口就说一句，默认 30，填 0 关闭")}
+          <label class="f">进度提示<span class="hint">留空用默认的“还在处理，请稍等”</span>
+            <input class="in" data-k="progress_reply" value="${esc(v.progress_reply || "")}" placeholder="还在处理，请稍等"></label>
           <label class="f full">接续关键字<span class="hint">超过自动接续时间后，说这些话会接着上次的对话，用逗号分隔</span>
             <input class="in" data-k="resume_keywords" value="${esc((v.resume_keywords || []).join("，"))}"></label>
           <label class="f full">CLI 路径<span class="hint">留空自动查找</span><input class="in mono" data-k="cli_path" value="${esc(v.cli_path || "")}"></label>

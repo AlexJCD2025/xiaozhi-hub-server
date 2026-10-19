@@ -46,6 +46,7 @@ VOICE_RULES = f"""
 3. 不要使用 Markdown、列表、编号、代码块、链接、表格等任何格式符号。
 4. 需要调用工具时，调用前最多说一句过渡语；完成后用一两句话汇报结果，不要念出代码、命令、路径细节和文件内容。
 5. 用户没问时，不要主动解释自己有哪些工具、权限或限制。
+6. 不要用后台方式运行命令或任务（例如 run_in_background）：这一轮说完后你没法再主动开口，后台任务的结果用户永远听不到。需要等的命令就在前台运行，把超时设够；设备会陪着等，期间会自动提示"还在处理"。
 """
 
 COMMON_CLI_PATHS = [
@@ -129,10 +130,14 @@ class LLMProvider(LLMProviderBase):
             # 默认 low：语音场景以快速应答为主，实测工具类问题从约 6 秒降到约 4 秒
             effort=str(config.get("effort", "low") or "").strip() or None,
         )
-        # 超时类配置填 0 表示不限制
-        self.turn_timeout = _num(config, "turn_timeout_seconds", 120) or float("inf")
-        # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住
+        # 超时类配置填 0 表示不限制。单轮默认 10 分钟：Claude 干长任务时设备陪着等，期间连接不会因"没人说话"断开
+        self.turn_timeout = _num(config, "turn_timeout_seconds", 600) or float("inf")
+        # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住。
+        # 工具执行期间（例如跑一条很慢的命令）不算，只受单轮超时限制
         self.stall_timeout = _num(config, "stall_timeout_seconds", 30) or float("inf")
+        # 干活期间这么久没开口，就说一句进度，让人知道还在做；填 0 关闭
+        self.progress_interval = _num(config, "progress_interval_seconds", 30)
+        self.progress_reply = single_sentence(config.get("progress_reply") or "还在处理，请稍等")
         self.idle_timeout = _num(config, "idle_timeout_seconds", 300)  # 0：每轮结束就关闭进程
         self.resume_window = _num(config, "resume_window_minutes", 120)  # 0：不自动接续
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
@@ -359,6 +364,9 @@ class LLMProvider(LLMProviderBase):
 
         t0 = time.time()
         last_event_at = t0
+        last_spoken_at = t0       # 上一次说话（填充语、正式回复、进度提示）的时间
+        tail = ""                 # 已说出的最后一个字，判断能不能在这里插一句进度
+        tools_running = 0
         first_at = None
         filler_sent = False
         emotion_buf = ""          # 填充语之后，正式回复开头的几个字，用来找表情
@@ -369,11 +377,16 @@ class LLMProvider(LLMProviderBase):
                 try:
                     ev = out.get(timeout=0.2)
                 except queue.Empty:
+                    self._keep_alive(st)
                     elapsed = time.time() - t0
                     if first_at is None and self.filler and not filler_sent and elapsed >= self.filler_delay:
                         filler_sent = True
+                        last_spoken_at, tail = time.time(), self.filler[-1]
                         yield f"😶{self.filler}"
-                    stalled = time.time() - last_event_at >= self.stall_timeout
+                    elif self._progress_due(last_spoken_at, tail, first_at is not None or filler_sent):
+                        last_spoken_at, tail = time.time(), self.progress_reply[-1]
+                        yield self.progress_reply if (first_at is not None or filler_sent) else f"😶{self.progress_reply}"
+                    stalled = not tools_running and time.time() - last_event_at >= self.stall_timeout
                     if elapsed >= self.turn_timeout or stalled:
                         kind = ErrorKind.STALLED if stalled else ErrorKind.TIMEOUT
                         logger.bind(tag=TAG).warning(
@@ -388,7 +401,10 @@ class LLMProvider(LLMProviderBase):
                         return
                     continue
                 last_event_at = time.time()
+                self._keep_alive(st)
                 if isinstance(ev, Activity):
+                    if ev.tools_running >= 0:
+                        tools_running = ev.tools_running
                     continue
                 if isinstance(ev, TextDelta):
                     if first_at is None:
@@ -402,6 +418,8 @@ class LLMProvider(LLMProviderBase):
                             emotion_resent = True
                             if emoji:
                                 self._send_emotion(st, emoji)
+                    if ev.text.strip():
+                        last_spoken_at, tail = time.time(), ev.text.strip()[-1]
                     yield ev.text
                 elif isinstance(ev, Error):
                     logger.bind(tag=TAG).error(f"Claude Code 错误 [{ev.kind.value}]: {ev.detail[:500]}")
@@ -420,6 +438,25 @@ class LLMProvider(LLMProviderBase):
             if not finished and st.agent:
                 # 生成器被提前关闭（例如设备打断后服务端停止迭代），让 Claude 也停下来
                 asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+
+    @staticmethod
+    def _keep_alive(st: ConnState) -> None:
+        """Claude 干活期间刷新连接的活动时间。
+
+        服务端在"没有任何动静"一段时间后会兜底断开连接（core/connection.py 的 _check_timeout，
+        默认 180 秒）。干活时设备在等、服务端也可能很久不说话，不刷新的话长任务做到一半连接就断了，
+        Claude Code 进程也会随之关闭。
+        """
+        if st.conn is not None:
+            st.conn.last_activity_time = time.time() * 1000
+
+    def _progress_due(self, last_spoken_at: float, tail: str, spoke: bool) -> bool:
+        """该不该说一句进度：超过间隔没开口，而且上一句已经说完（不在半句话中间插话）。"""
+        if not self.progress_reply or not self.progress_interval:
+            return False
+        if time.time() - last_spoken_at < self.progress_interval:
+            return False
+        return not spoke or not tail or tail in "。！？!?.;；~～…" or tail in textUtils.EMOJI_MAP
 
     def _send_emotion(self, st: ConnState, emoji: str) -> None:
         conn = st.conn

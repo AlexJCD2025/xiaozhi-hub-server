@@ -176,6 +176,13 @@ def save_claude_cli(payload: dict, merged: dict, path: Path = None) -> list:
                  "resume_window_minutes", "filler_delay_seconds"):
         if name in payload:
             _check_positive_number(name, payload[name])
+    raw = str(payload.get("progress_interval_seconds", "")).strip()
+    if raw:  # 留空表示用默认值，0 表示关闭进度提示
+        try:
+            if float(raw) < 0:
+                raise ValueError
+        except ValueError:
+            raise ValueError("进度提示间隔需要是 0 或正数，0 表示关闭")
     return config_store.update_entry("LLM", CLAUDE_CLI_ENTRY, payload, merged, path)
 
 

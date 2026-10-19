@@ -273,14 +273,21 @@ class ClaudeSession(AgentSession):
         streamed = False  # 当前这条 assistant 消息是否已经通过逐字流输出过
         last_char = ""
         last_activity = 0.0
+        pending_tools = set()  # 已调用、还没返回结果的工具（只看主对话，子代理的工具包在 Task 工具里）
         try:
             await self._client.query(text)
             async for msg in self._client.receive_response():
                 self._log_message(msg)
+                before = len(pending_tools)
+                if isinstance(msg, AssistantMessage) and msg.parent_tool_use_id is None:
+                    pending_tools.update(b.id for b in msg.content if isinstance(b, ToolUseBlock))
+                elif isinstance(msg, UserMessage) and msg.parent_tool_use_id is None and isinstance(msg.content, list):
+                    pending_tools.difference_update(b.tool_use_id for b in msg.content if isinstance(b, ToolResultBlock))
                 is_text = isinstance(msg, StreamEvent) and ((msg.event or {}).get("delta") or {}).get("type") == "text_delta"
-                if not is_text and time.monotonic() - last_activity >= 1:
+                # 节流：每秒最多一次；正在执行的工具数变了要马上告诉调用方
+                if (not is_text and time.monotonic() - last_activity >= 1) or len(pending_tools) != before:
                     last_activity = time.monotonic()
-                    yield Activity(type(msg).__name__)  # 节流：每秒最多一次
+                    yield Activity(type(msg).__name__, tools_running=len(pending_tools))
                 if isinstance(msg, StreamEvent):
                     if msg.parent_tool_use_id is not None:
                         continue  # 子代理的输出不读

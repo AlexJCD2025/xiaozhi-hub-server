@@ -29,7 +29,11 @@ SECRET_FIELD = re.compile(
     re.I,
 )
 # 条目里原本没有、但允许在后台新增的字段：{条目 type: {字段: 类型}}
-ADDABLE_FIELDS = {"openai": {"extra_body": "json"}}
+ADDABLE_FIELDS = {
+    "openai": {"extra_body": "json"},
+    # 后来新增的配置项：老用户的配置文件里没有，也要能在后台改
+    "claude_cli": {"progress_interval_seconds": "number", "progress_reply": "text"},
+}
 
 
 def default_config_path() -> Path:
@@ -174,6 +178,8 @@ def update_entry(section: str, name: str, payload: dict, merged: dict, path: Pat
             continue
         if kind == "secret" and (raw is None or str(raw).strip() == ""):
             continue  # 密钥留空表示不修改
+        if field not in entry and (raw is None or str(raw).strip() == ""):
+            continue  # 允许新增的字段留空表示不设置（数字留空也不报错）
         try:
             value = _convert(kind, raw, entry.get(field))
         except (ValueError, TypeError) as e:

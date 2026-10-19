@@ -45,9 +45,14 @@ class TextDelta:
 
 @dataclass
 class Activity:
-    """Agent 仍在工作（思考、调用工具等），但没有产出要读出来的文字。用于判断是否卡住。"""
+    """Agent 仍在工作（思考、调用工具等），但没有产出要读出来的文字。用于判断是否卡住。
+
+    tools_running：正在执行、还没返回结果的工具数；-1 表示不知道。工具执行期间（例如跑一条很慢的命令）
+    Agent 可能很久没有任何事件，这不算卡住。
+    """
 
     label: str = ""
+    tools_running: int = -1
 
 
 @dataclass
