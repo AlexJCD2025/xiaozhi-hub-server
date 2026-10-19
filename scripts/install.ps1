@@ -192,7 +192,7 @@ Write-Host @"
 安装完成。
 
   启动服务：  powershell -ExecutionPolicy Bypass -File scripts\start.ps1
-  卸载：      powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
+  卸载：      先 cd ~ 离开项目目录，再运行 powershell -ExecutionPolicy Bypass -File "$Root\scripts\uninstall.ps1"
   首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:$HttpPort/admin 设置密码。
 $LlmHint
 
