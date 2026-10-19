@@ -99,3 +99,28 @@ async def test_check_connection_against_local_server(monkeypatch):
 
     r = await doubao_stream.check_connection({**UPSTREAM, "api_key": "good"}, timeout=2)  # 服务已关闭
     assert r["ok"] is False and "连不上" in r["error"]
+
+
+def test_connect_failed_notice_not_kept_in_dialogue(monkeypatch):
+    """连不上时设备说一句提示，但这句不能留在对话记录里，否则会随下一次请求发给 API 模型。"""
+    from types import SimpleNamespace
+
+    from core.handle import intentHandler
+    from core.utils.dialogue import Dialogue, Message
+
+    dialogue = Dialogue()
+    dialogue.put(Message(role="user", content="你好"))
+    spoken = []
+
+    def fake_speak(conn, text):
+        spoken.append(text)
+        conn.dialogue.put(Message(role="assistant", content=text))  # 和真的 speak_txt 一样记一条
+
+    monkeypatch.setattr(intentHandler, "speak_txt", fake_speak)
+    conn = SimpleNamespace(dialogue=dialogue, sentence_id=None)
+    p = provider(api_key="volc-key")
+    p._connect_failed(conn)
+    assert spoken == [doubao_stream.NOTICE_TEXT]
+    assert [m.content for m in dialogue.dialogue] == ["你好"]
+    p._connect_failed(conn)  # 一分钟内不再提示
+    assert len(spoken) == 1

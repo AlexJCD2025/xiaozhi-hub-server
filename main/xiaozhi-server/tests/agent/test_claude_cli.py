@@ -201,6 +201,17 @@ def test_glob_pattern_cannot_escape_workdir(tmp_path):
     assert outside_workdir({"pattern": "*.py", "path": "/etc"}, root, "Glob") == "/etc"
 
 
+
+def test_path_on_another_drive_counts_as_outside(tmp_path, monkeypatch):
+    """Windows 上两个路径不在同一个盘时 commonpath 会抛 ValueError，要当作在工作目录之外，而不是让钩子出错。"""
+    from core.agent import claude_session
+
+    def other_drive(paths):
+        raise ValueError("Paths don't have the same drive")
+
+    monkeypatch.setattr(claude_session.os.path, "commonpath", other_drive)
+    assert claude_session.outside_workdir({"file_path": "D:/secret.txt"}, str(tmp_path), "Read") == "D:/secret.txt"
+
 async def test_glob_guard_in_hook(tmp_path):
     o = ClaudeSession(ClaudeSessionConfig(allowed_tools=["Glob"], workdir=str(tmp_path)))._options()
     hook = o.hooks["PreToolUse"][0].hooks[0]

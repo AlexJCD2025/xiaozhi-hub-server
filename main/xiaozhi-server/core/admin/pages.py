@@ -274,7 +274,7 @@ def desired_intent(merged: dict, llm_name: str, path: Path = None):
 # ---------- 语音识别 ----------
 
 # sherpa-onnx 各 model_type 需要的文件，第一个是主模型文件（用来判断有没有下载完整）。
-# 和 core/providers/asr/sherpa_onnx_local.py 的 EXTRA_MODEL_FILES 保持一致；那边会导入 modelscope，后台不直接引用
+# 和 core/providers/asr/sherpa_onnx_local.py 的 EXTRA_MODEL_FILES 保持一致；那边会导入 sherpa_onnx 等重的库，后台不直接引用
 SHERPA_MODEL_FILES = {
     "sense_voice": ["model.int8.onnx", "tokens.txt"],
     "paraformer": ["model.int8.onnx", "tokens.txt"],

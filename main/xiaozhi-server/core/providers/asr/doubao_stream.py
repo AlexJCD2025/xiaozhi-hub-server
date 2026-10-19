@@ -198,6 +198,10 @@ class ASRProvider(ASRProviderBase):
 
             conn.sentence_id = uuid.uuid4().hex
             speak_txt(conn, NOTICE_TEXT)
+            # speak_txt 会把这句记成模型的回复；它是服务端的提示，不能随下一次请求发给 API 模型
+            history = getattr(getattr(conn, "dialogue", None), "dialogue", None)
+            if history and getattr(history[-1], "content", None) == NOTICE_TEXT:
+                history.pop()
         except Exception as e:  # 提示失败不影响后面重试
             logger.bind(tag=TAG).warning(f"提示连接失败时出错: {e}")
 

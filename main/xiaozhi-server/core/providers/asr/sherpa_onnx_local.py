@@ -13,7 +13,7 @@ from core.providers.asr.base import ASRProviderBase
 import numpy as np
 import sherpa_onnx
 
-from modelscope.hub.file_download import model_file_download
+# [xiaozhi-hub] modelscope 改为用到时才导入（只有自动下载 SenseVoice 模型时需要）
 
 TAG = __name__
 logger = setup_logging()
@@ -87,6 +87,8 @@ class ASRProvider(ASRProviderBase):
             for file_name, file_path in model_files.items():
                 if not os.path.isfile(file_path):
                     logger.bind(tag=TAG).info(f"正在下载模型文件: {file_name}")
+                    from modelscope.hub.file_download import model_file_download  # [xiaozhi-hub]
+
                     model_file_download(
                         model_id="pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue",
                         file_path=file_name,
