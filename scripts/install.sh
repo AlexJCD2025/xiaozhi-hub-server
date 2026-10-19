@@ -45,6 +45,10 @@ file_size() { "$PY" -c 'import os,sys; print(os.path.getsize(sys.argv[1]) if os.
 
 OS="$(uname -s)"
 [[ "$OS" == "Darwin" || "$OS" == "Linux" ]] || fail "不支持的系统：${OS}（Windows 请使用 scripts/install.ps1）"
+# Claude Code 的登录信息、工作目录、开机自启都跟着当前用户走，用 root 装会和平时用的账号对不上
+if [[ "$(id -u)" == "0" ]]; then
+  info "⚠️  正在以 root 运行。一般请用平时登录的账号运行，不要加 sudo（需要时脚本会自己用 sudo 装系统依赖）"
+fi
 
 # ---------- 1. uv ----------
 step "检查 uv（用于管理 Python 版本和虚拟环境）"
@@ -76,18 +80,22 @@ if [[ "$OS" == "Darwin" ]]; then
     fi
   fi
 else
+  # root 下（例如容器里）通常没有 sudo，直接运行
+  SUDO=sudo; [[ "$(id -u)" == "0" ]] && SUDO=""
   need=()
   command -v ffmpeg >/dev/null 2>&1 || need+=(ffmpeg)
-  if ! (ldconfig -p 2>/dev/null | grep -q libopus); then need+=(opus); fi
+  # Debian/Ubuntu 的普通用户 PATH 里没有 /sbin，直接调 ldconfig 会找不到命令
+  if ! ({ ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null; } | grep -q libopus); then need+=(opus); fi
   if (( ${#need[@]} == 0 )); then info "opus、ffmpeg 已安装"; else
     if command -v apt-get >/dev/null 2>&1; then
       pkgs=(); for p in "${need[@]}"; do [[ "$p" == opus ]] && pkgs+=(libopus0) || pkgs+=(ffmpeg); done
-      cmd=(sudo apt-get install -y "${pkgs[@]}")
+      # 新装的系统可能还没有软件包列表，先 update，否则会报"找不到软件包"
+      cmd=($SUDO sh -c "apt-get update && apt-get install -y ${pkgs[*]}")
     elif command -v dnf >/dev/null 2>&1; then
       pkgs=(); for p in "${need[@]}"; do [[ "$p" == opus ]] && pkgs+=(opus) || pkgs+=(ffmpeg); done
-      cmd=(sudo dnf install -y "${pkgs[@]}")
+      cmd=($SUDO dnf install -y "${pkgs[@]}")
     elif command -v pacman >/dev/null 2>&1; then
-      cmd=(sudo pacman -S --noconfirm "${need[@]}")
+      cmd=($SUDO pacman -S --noconfirm "${need[@]}")
     else
       fail "无法自动安装 ${need[*]}，请用系统的包管理器安装后重新运行本脚本"
     fi
@@ -180,6 +188,9 @@ print(port)
 PYEOF
 )"
 
+# 安装步骤全部做完，留个标记：update.sh 看到没有这个文件时，会接着把安装做完
+: >"$SERVER/data/.install-complete"
+
 # update.sh 调用时到这里就结束：重启服务由 update.sh 处理
 [[ "${HUB_UPDATING:-0}" == "1" ]] && exit 0
 
@@ -193,7 +204,12 @@ if bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
     info "已开启开机自启，但后台服务重启失败，请运行 bash \"$ROOT/scripts/autostart.sh\" status 查看"
   fi
 elif ask "是否设置开机自启？（服务在后台运行，开机登录后自动启动，不用每次手动运行 start.sh）" N; then
-  if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1; else
+  if bash "$ROOT/scripts/autostart.sh" enable; then AUTOSTART=1
+  elif bash "$ROOT/scripts/autostart.sh" status >/dev/null 2>&1; then
+    # 已经开启，只是这次没启动成功（会每 30 秒自动重试）
+    AUTOSTART=1
+    info "开机自启已开启，但服务暂时没有启动成功，请按上面的报错处理"
+  else
     info "设置失败，可以稍后运行 bash \"$ROOT/scripts/autostart.sh\" enable 重试"
   fi
 else
@@ -201,7 +217,7 @@ else
 fi
 
 if [[ "$AUTOSTART" == "1" ]]; then
-  START_HINT="服务已在后台运行，开机后会自动启动。查看状态：bash \"$ROOT/scripts/autostart.sh\" status"
+  START_HINT="服务在后台运行，开机登录后会自动启动。查看状态：bash \"$ROOT/scripts/autostart.sh\" status"
 else
   START_HINT="启动服务：bash \"$ROOT/scripts/start.sh\""
 fi

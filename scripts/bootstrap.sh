@@ -32,7 +32,10 @@ main() {
   info "$(git --version)"
 
   if [[ -e "$dir" ]]; then
-    if [[ -f "$dir/scripts/update.sh" ]] && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 \
+      && [[ "$(git -C "$dir" remote get-url origin 2>/dev/null || true)" == *xiaozhi-hub-server* ]]; then
+      # 已经装过（或上次安装中途失败）：update.sh 拉取新代码，并在安装没完成时接着装完
+      [[ -f "$dir/scripts/update.sh" ]] || fail "${dir} 是旧版本，还没有更新脚本。请先运行 git -C \"$dir\" pull，再重新运行本命令"
       step "已经安装在 ${dir}，改为更新到最新版本"
       run_with_tty bash "$dir/scripts/update.sh"
       return
@@ -42,13 +45,16 @@ main() {
 
   step "下载代码到 ${dir}"
   # sparse checkout 需要 git 2.25 以上；更老的版本退回到完整检出（多下载约 200MB）
+  # 下载失败时删掉下了一半的目录，否则重新运行本命令会被当成"目录已存在"
   if git_at_least 2 25; then
     info "只下载 ${sparse_paths[*]}（不含上游智控台、数字人等用不到的目录和提交历史）"
-    git clone --depth 1 --filter=blob:none --sparse --branch "$branch" "$repo" "$dir"
-    git -C "$dir" sparse-checkout set "${sparse_paths[@]}"
+    { git clone --depth 1 --filter=blob:none --sparse --branch "$branch" "$repo" "$dir" \
+      && git -C "$dir" sparse-checkout set "${sparse_paths[@]}"; } \
+      || { rm -rf "$dir"; fail "代码下载失败，请检查能否访问 GitHub 后重新运行本命令"; }
   else
     info "git 版本较老，不支持只下载部分目录，将下载完整代码（不含提交历史）"
-    git clone --depth 1 --branch "$branch" "$repo" "$dir"
+    git clone --depth 1 --branch "$branch" "$repo" "$dir" \
+      || { rm -rf "$dir"; fail "代码下载失败，请检查能否访问 GitHub 后重新运行本命令"; }
   fi
 
   step "运行安装脚本"

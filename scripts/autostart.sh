@@ -21,6 +21,28 @@ ERR_LOG="$SERVER/tmp/autostart-error.log"
 info() { printf "    %s\n" "$*"; }
 fail() { printf "\033[31m✗ %s\033[0m\n" "$*" >&2; exit 1; }
 
+# 服务的 HTTP 端口（管理后台、OTA 用的那个）
+hub_port() {
+  (cd "$SERVER" && .venv/bin/python -c 'from core.admin import config_store; print(int((config_store.load_merged().get("server") or {}).get("http_port", 8003)))' 2>/dev/null) || echo 8003
+}
+ota_up() { curl -s -m 2 -o /dev/null "http://127.0.0.1:$1/xiaozhi/ota/"; }
+
+# 等服务真正能访问（启动时要加载语音识别模型，一般十几秒），起不来就把报错显示出来
+wait_ready() {
+  local port="$1" i
+  command -v curl >/dev/null 2>&1 || return 0
+  info "等待服务启动 ..."
+  for ((i = 0; i < 45; i++)); do
+    ota_up "$port" && { info "服务已启动：http://127.0.0.1:$port/admin"; return 0; }
+    sleep 2
+  done
+  printf "\033[31m✗ 服务 90 秒内没有启动成功。\033[0m 最近的报错：\n" >&2
+  if [[ "$P" == mac ]]; then tail -n 15 "$ERR_LOG" 2>/dev/null >&2 || true
+  else journalctl --user -u "$UNIT" -n 15 --no-pager >&2 2>/dev/null || true; fi
+  info "完整日志：$SERVER/tmp/server.log" >&2
+  return 1
+}
+
 xml_escape() { local s="${1//&/&amp;}"; s="${s//</&lt;}"; printf '%s' "${s//>/&gt;}"; }
 
 # ---------- macOS：launchd ----------
@@ -46,6 +68,7 @@ mac_enable() {
   <dict>
     <key>PATH</key><string>$(xml_escape "$PATH")</string>
     <key>SKIP_DOCTOR</key><string>1</string>
+    <key>HUB_AUTOSTART</key><string>1</string>
     <key>PYTHONUTF8</key><string>1</string>
     <key>AUTOSTART_ERR_LOG</key><string>$(xml_escape "$ERR_LOG")</string>
   </dict>
@@ -91,7 +114,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$SERVER
-Environment="PATH=$path_env" SKIP_DOCTOR=1 PYTHONUTF8=1
+Environment="PATH=$path_env" SKIP_DOCTOR=1 HUB_AUTOSTART=1 PYTHONUTF8=1
 ExecStart=/bin/bash "$ROOT/scripts/start.sh"
 Restart=on-failure
 RestartSec=30
@@ -103,9 +126,10 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now "$UNIT"
   # 不开 linger 的话，用户登录后服务才会启动、退出登录后停止
-  if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)" != "yes" ]]; then
+  local user="${USER:-$(id -un)}"
+  if [[ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null || true)" != "yes" ]]; then
     info "提示：现在要登录这个用户后服务才会启动。想开机就启动（不用登录），请运行："
-    info "  sudo loginctl enable-linger $USER"
+    info "  sudo loginctl enable-linger $user"
   fi
 }
 
@@ -127,11 +151,24 @@ esac
 case "${1:-}" in
   enable)
     [[ -x "$SERVER/.venv/bin/python" ]] || fail "还没安装，请先运行：bash \"$ROOT/scripts/install.sh\""
+    # 后台服务读不到"文稿""桌面""下载"和 iCloud 里的文件（macOS 的隐私保护），放在这些目录里会一直启动失败
+    if [[ "$P" == mac ]]; then
+      case "$ROOT/" in
+        "$HOME/Documents/"* | "$HOME/Desktop/"* | "$HOME/Downloads/"* | "$HOME/Library/Mobile Documents/"*)
+          fail "安装目录在\"文稿/桌面/下载/iCloud\"里，macOS 不允许后台服务读取这些目录。请把 $ROOT 移到别处（例如 ~/xiaozhi-hub-server）后再开启" ;;
+      esac
+    fi
+    port="$(hub_port)"
+    # 已经开启过的先停掉，再看端口：还被占用说明有手动启动的服务在运行，两个会抢同一个端口
+    if "${P}_enabled"; then "${P}_disable"; fi
+    if ota_up "$port"; then
+      fail "端口 $port 已被占用，可能有用 start.sh 手动启动的服务在运行。请先在它的终端按 Ctrl+C 停止，再开启开机自启"
+    fi
     "${P}_enable"
-    info "已设置开机自启，服务正在后台启动"
+    info "已设置开机自启"
     [[ "$P" == mac ]] && info "（登录这个 macOS 用户后自动启动；想开机就启动，请在 系统设置 → 用户与群组 里开启自动登录）"
-    info "日志：$SERVER/tmp/server.log"
     info "取消：bash \"$ROOT/scripts/autostart.sh\" disable"
+    wait_ready "$port"
     ;;
   disable)
     "${P}_disable"
@@ -140,6 +177,8 @@ case "${1:-}" in
   restart)
     "${P}_enabled" || fail "没有开启开机自启。手动启动的服务请在它的终端按 Ctrl+C 停止，再运行 bash \"$ROOT/scripts/start.sh\""
     "${P}_restart"
+    sleep 3  # 让旧进程先退出，免得下面连到的还是旧进程
+    wait_ready "$(hub_port)"
     info "后台服务已重启"
     ;;
   status)
