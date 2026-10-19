@@ -66,7 +66,7 @@ bash scripts/install.sh   # install
 bash scripts/start.sh     # start (if autostart is not enabled)
 ```
 
-To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh` (use your own directory if you cloned manually).
+To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh`; to uninstall (this also removes autostart): `bash ~/xiaozhi-hub-server/scripts/uninstall.sh` (use your own directory if you cloned manually).
 
 Once the server is running, you need two addresses:
 
