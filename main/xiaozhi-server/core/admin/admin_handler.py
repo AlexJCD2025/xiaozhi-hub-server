@@ -593,6 +593,11 @@ class AdminHandler:
         for vad in instances:
             if hasattr(vad, "silence_threshold_ms"):
                 vad.silence_threshold_ms = value
+        # 豆包每句话开始时才把判停时长发给识别服务，改正在用的实例，下一句话就用上
+        for item in connections.snapshot():
+            asr = getattr(connections.get(item["session_id"]), "asr", None)
+            if getattr(asr, "interface_type", None) is not None and hasattr(asr, "end_window_size"):
+                asr.end_window_size = max(200, value)
         return self._json({"ok": True, "changed": ["silence_ms"], "note": "已保存，马上生效"})
 
     async def handle_tts(self, request: web.Request):

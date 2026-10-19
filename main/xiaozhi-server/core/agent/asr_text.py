@@ -98,9 +98,10 @@ def hotwords_supported(asr_entry: dict) -> bool:
 
 
 def legacy_hotwords(config: dict):
-    """旧版本存在识别条目里的热词；没有时返回 None。"""
+    """旧版本后台把热词存在本地 sherpa-onnx 条目里（如 SherpaXASR）；没有时返回 None。
+    只看这类条目：上游其他条目以后加了 hotwords 字段，也不会被当成用户的热词。"""
     for entry in ((config or {}).get("ASR") or {}).values():
-        if isinstance(entry, dict) and isinstance(entry.get("hotwords"), list):
+        if isinstance(entry, dict) and entry.get("type") == "sherpa_onnx_local" and isinstance(entry.get("hotwords"), list):
             return _aliases(entry["hotwords"])
     return None
 

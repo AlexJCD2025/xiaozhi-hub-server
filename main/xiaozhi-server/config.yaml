@@ -465,6 +465,7 @@ ASR:
     # 详细语言列表参考 https://www.volcengine.com/docs/6561/1354869
     # language: zh-cn
     # 静音判定时长(ms)，默认200ms
+    # [xiaozhi-hub] 实际使用后台“说完停顿多久算一句”的时长（VAD 的 min_silence_duration_ms），这里的值不起作用
     end_window_size: 200
     output_dir: tmp/
   TencentASR:

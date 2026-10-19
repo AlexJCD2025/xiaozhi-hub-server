@@ -190,6 +190,11 @@ def test_describe_vad_flags_stream_asr(cfg_path):
     cfg_path.write_text(CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: AliyunStreamASR\n"),
                         encoding="utf-8")
     assert pages.describe_vad(merged(cfg_path))["asr_stream"] is True
+    # 豆包也是流式，但它按这里的时长断句
+    cfg_path.write_text(CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: DoubaoStreamASRV2\n"),
+                        encoding="utf-8")
+    v = pages.describe_vad(merged(cfg_path))
+    assert v["asr_stream"] is False and v["asr_doubao"] is True
 
 
 def test_intent_plugins_keep_manual_extras(cfg_path):
@@ -430,7 +435,8 @@ async def test_vad_save_applies_to_running_instances(cfg_path):
     app = web.Application()
     handler = ah.AdminHandler(running, ws_server=ws, config_path=cfg_path)
     handler.register(app)
-    fake = SimpleNamespace(session_id="s-8", device_id="dev-8", client_ip="x", vad=own,
+    doubao = SimpleNamespace(interface_type="stream", end_window_size=200)  # 连接自己的豆包实例
+    fake = SimpleNamespace(session_id="s-8", device_id="dev-8", client_ip="x", vad=own, asr=doubao,
                            config={"VAD": {"SileroVAD": {"min_silence_duration_ms": 200}}})
     connections.register(fake)
     try:
@@ -441,6 +447,7 @@ async def test_vad_save_applies_to_running_instances(cfg_path):
             r = await (await c.post("/admin/api/vad", json={"silence_ms": "900"})).json()
             assert r["note"] == "已保存，马上生效"
             assert shared.silence_threshold_ms == 900 and own.silence_threshold_ms == 900
+            assert doubao.end_window_size == 900  # 豆包下一句话就用新的判停时长
             assert running["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900
             assert fake.config["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900
             assert merged(cfg_path)["VAD"]["SileroVAD"]["min_silence_duration_ms"] == 900

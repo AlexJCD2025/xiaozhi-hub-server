@@ -1,5 +1,6 @@
 import json
 import gzip
+import time
 import uuid
 import asyncio
 import websockets
@@ -26,6 +27,13 @@ def _mask(value: str) -> str:
     return f"{value[:4]}…" if value else ""
 
 
+# [xiaozhi-hub] 连不上豆包时（Key 不对、网络断了）：上游每个有声音的音频帧都重连一次，说一句话要连几十次。
+# 失败后隔几秒再试，并让设备说一句提示（每分钟最多一次），免得设备一直不出声
+RETRY_SECONDS = 3
+NOTICE_SECONDS = 60
+NOTICE_TEXT = "语音识别连不上，请在管理后台检查豆包的密钥和网络"
+
+
 class ASRProvider(ASRProviderBase):
     def __init__(self, config, delete_audio_file):
         super().__init__()
@@ -36,6 +44,8 @@ class ASRProvider(ASRProviderBase):
         self.forward_task = None
         self.is_processing = False  # 添加处理状态标志
         self._is_stopping = False  # 添加停止标志，防止竞态条件
+        self._retry_at = 0.0  # [xiaozhi-hub] 连接失败后，这个时间之前不再重连
+        self._noticed_at = None
 
         # 配置参数
         # [xiaozhi-hub] 新版控制台只有一个 API Key（X-Api-Key）；旧版控制台用 appid + access_token
@@ -89,7 +99,8 @@ class ASRProvider(ASRProviderBase):
         await super().receive_audio(conn, pcm_frame, audio_have_voice)
 
         # 如果本次有声音，且之前没有建立连接
-        if audio_have_voice and self.asr_ws is None and not self.is_processing:
+        if audio_have_voice and self.asr_ws is None and not self.is_processing \
+                and time.monotonic() >= self._retry_at:
             try:
                 self.is_processing = True
                 # 建立新的WebSocket连接
@@ -161,6 +172,7 @@ class ASRProvider(ASRProviderBase):
                     await self.asr_ws.close()
                     self.asr_ws = None
                 self.is_processing = False
+                self._connect_failed(conn)
                 return
 
         # 发送当前音频数据
@@ -173,6 +185,21 @@ class ASRProvider(ASRProviderBase):
                 await self.asr_ws.send(audio_request)
             except Exception as e:
                 logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {e}")
+
+    def _connect_failed(self, conn) -> None:
+        """[xiaozhi-hub] 隔几秒再重连；让设备提示一次。"""
+        now = time.monotonic()
+        self._retry_at = now + RETRY_SECONDS
+        if self._noticed_at is not None and now - self._noticed_at < NOTICE_SECONDS:
+            return
+        self._noticed_at = now
+        try:
+            from core.handle.intentHandler import speak_txt
+
+            conn.sentence_id = uuid.uuid4().hex
+            speak_txt(conn, NOTICE_TEXT)
+        except Exception as e:  # 提示失败不影响后面重试
+            logger.bind(tag=TAG).warning(f"提示连接失败时出错: {e}")
 
     async def _forward_asr_results(self, conn: "ConnectionHandler"):
         try:
@@ -463,12 +490,11 @@ class ASRProvider(ASRProviderBase):
 
 
 async def check_connection(config: dict, timeout: float = 10) -> dict:
-    """[xiaozhi-hub] 管理后台的"测试连接"：建连、发初始化请求和 0.5 秒静音，收到识别服务的回应就算通过。
+    """[xiaozhi-hub] 管理后台的"测试连接"：建连（鉴权、资源 ID 不对会被拒绝）并发初始化请求，收到正常回应就算通过。
+    不发音频：一段静音可能被当成无效音频报错，反而让人以为 Key 不对。
 
     返回 {"ok": True, "seconds": 用时} 或 {"ok": False, "error": 给用户看的原因}。
     """
-    import time
-
     provider = ASRProvider({**config, "hotwords": []}, True)
     started = time.time()
 
@@ -482,13 +508,8 @@ async def check_connection(config: dict, timeout: float = 10) -> dict:
             request = json.dumps(provider.construct_request(str(uuid.uuid4()))).encode()
             await ws.send(packet(provider.generate_header(), request))
             result = provider.parse_response(await asyncio.wait_for(ws.recv(), timeout))
-            if "code" in result and result["code"] not in (1000, 1013):
+            if "code" in result and result["code"] != 1000:
                 return {"ok": False, "error": f"识别服务返回错误 {result['code']}：{str(result.get('payload_msg'))[:200]}"}
-            await ws.send(packet(provider.generate_last_audio_default_header(), b"\0" * 16000))
-            result = provider.parse_response(await asyncio.wait_for(ws.recv(), timeout))
-            code = result.get("code") or (result.get("payload_msg") or {}).get("code")
-            if code not in (None, 1000, 1013, 20000000):
-                return {"ok": False, "error": f"识别服务返回错误 {code}：{str(result.get('payload_msg'))[:200]}"}
     except websockets.InvalidStatus as e:
         status = e.response.status_code
         body = (e.response.body or b"").decode("utf-8", "replace")[:200]
