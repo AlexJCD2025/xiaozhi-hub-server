@@ -433,3 +433,31 @@ async def test_vad_save_applies_to_running_instances(cfg_path):
             assert (await c.post("/admin/api/vad", json={"silence_ms": 800})).status == 401
     finally:
         connections.unregister(fake)
+
+
+def test_asr_model_check_by_model_type(tmp_path):
+    entry = {"type": "sherpa_onnx_local", "model_type": "funasr_nano", "model_dir": str(tmp_path)}
+    assert pages.asr_label(entry) == "本地识别 · Fun-ASR-Nano（sherpa-onnx），不需要联网"
+    r = pages.asr_model_check(entry)
+    assert r["ok"] is False and "llm.int8.onnx" in r["detail"]
+    (tmp_path / "llm.int8.onnx").write_bytes(b"\0" * (101 * 1024 * 1024))
+    for name in ("encoder_adaptor.int8.onnx", "embedding.int8.onnx"):
+        (tmp_path / name).write_bytes(b"x")
+    assert "Qwen3-0.6B" in pages.asr_model_check(entry)["detail"]  # 分词器目录也要有
+    (tmp_path / "Qwen3-0.6B").mkdir()
+    assert pages.asr_model_check(entry) == {"ok": True, "detail": "llm.int8.onnx 101MB"}
+    # 没写 model_type 时按上游默认的 SenseVoice 检查
+    assert "model.int8.onnx" in pages.asr_model_check({"type": "sherpa_onnx_local", "model_dir": str(tmp_path)})["detail"]
+    assert pages.asr_model_check({"type": "doubao_stream"}) is None
+
+
+def test_default_xasr_entry_and_label(tmp_path):
+    """config.yaml 里本项目默认的 X-ASR 条目：transducer 类型，带热词，后台显示为 X-ASR。"""
+    empty = tmp_path / ".config.yaml"
+    empty.write_text("{}\n", encoding="utf-8")
+    entry = config_store.load_merged(custom_path=empty)["ASR"]["SherpaXASR"]
+    assert entry["type"] == "sherpa_onnx_local" and entry["model_type"] == "transducer"
+    assert "Claude Code" in entry["hotwords"] and "StackChan" in entry["hotwords"]
+    assert pages.asr_label(entry) == "本地识别 · X-ASR 中英混合（sherpa-onnx），不需要联网"
+    tmpl = (Path(__file__).resolve().parents[4] / "scripts" / "config.template.yaml").read_text(encoding="utf-8")
+    assert "ASR: SherpaXASR" in tmpl

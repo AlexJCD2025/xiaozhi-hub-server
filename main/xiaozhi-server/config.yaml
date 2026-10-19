@@ -401,6 +401,40 @@ ASR:
     model_dir: models/sherpa-onnx-paraformer-zh-small-2024-03-09
     output_dir: tmp/
     model_type: paraformer
+  # [xiaozhi-hub] 本项目默认的语音识别：X-ASR 中英混合模型（安装脚本会下载，约 175MB）。
+  # 实测 35 句中英混合口语：错字率 3.9%（SenseVoice 8.1%），每句约 90ms，内存约 0.5GB。需要 sherpa-onnx 1.13 以上
+  SherpaXASR:
+    type: sherpa_onnx_local
+    model_dir: models/sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03
+    output_dir: tmp/
+    model_type: transducer
+    num_threads: 2
+    # 热词：容易认错的专有名词，识别时优先考虑（修改后重启服务生效）。写原本的大小写
+    hotwords:
+    - Claude
+    - Claude Code
+    - Sonnet
+    - Opus
+    - Haiku
+    - Fable
+    - Codex
+    - GitHub
+    - StackChan
+    - Python
+    - Docker
+    - VS Code
+    - Markdown
+    - README
+    - JSON
+    - API
+    - npm
+    - commit
+    - push
+    - pull request
+    - issue
+    - PR
+    - bug
+    - debug
   DoubaoASR:
     # 可以在这里申请相关Key等信息
     # https://console.volcengine.com/speech/app

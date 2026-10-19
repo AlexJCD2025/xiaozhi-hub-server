@@ -261,15 +261,46 @@ def desired_intent(merged: dict, llm_name: str, path: Path = None):
 
 # ---------- 语音识别 ----------
 
+# sherpa-onnx 各 model_type 需要的文件，第一个是主模型文件（用来判断有没有下载完整）。
+# 和 core/providers/asr/sherpa_onnx_local.py 的 EXTRA_MODEL_FILES 保持一致；那边会导入 modelscope，后台不直接引用
+SHERPA_MODEL_FILES = {
+    "sense_voice": ["model.int8.onnx", "tokens.txt"],
+    "paraformer": ["model.int8.onnx", "tokens.txt"],
+    "fire_red_asr": ["encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"],
+    "fire_red_asr_ctc": ["model.int8.onnx", "tokens.txt"],
+    "funasr_nano": ["llm.int8.onnx", "encoder_adaptor.int8.onnx", "embedding.int8.onnx", "Qwen3-0.6B"],
+    "qwen3_asr": ["decoder.int8.onnx", "encoder.int8.onnx", "conv_frontend.onnx", "tokenizer"],
+    "transducer": ["encoder*.onnx", "decoder*.onnx", "joiner*.onnx", "tokens.txt"],
+}
+SHERPA_MODEL_LABELS = {
+    "sense_voice": "SenseVoice",
+    "paraformer": "Paraformer",
+    "fire_red_asr": "FireRedASR2-AED",
+    "fire_red_asr_ctc": "FireRedASR2-CTC",
+    "funasr_nano": "Fun-ASR-Nano",
+    "qwen3_asr": "Qwen3-ASR",
+    "transducer": "Zipformer Transducer",
+}
+
+
+def _find_model_file(model_dir: Path, name: str):
+    """name 带 * 时按通配符找，优先 int8；找不到返回 None。"""
+    if "*" not in name:
+        path = model_dir / name
+        return path if path.exists() else None
+    matches = sorted(model_dir.glob(name), key=lambda p: (".int8." not in p.name, p.name))
+    return matches[0] if matches else None
+
+
 def asr_model_check(asr_entry: dict):
     """本地 ASR 的模型文件检查；不是本地模型时返回 None。"""
-    model_files = {"sherpa_onnx_local": ("", ["model.int8.onnx", "tokens.txt"])}.get(asr_entry.get("type"))
-    if not model_files:
+    if asr_entry.get("type") != "sherpa_onnx_local":
         return None
-    model_dir = Path(get_project_dir()) / (asr_entry.get("model_dir") or model_files[0])
-    model = model_dir / model_files[1][0]
+    files = SHERPA_MODEL_FILES.get(asr_entry.get("model_type") or "sense_voice", SHERPA_MODEL_FILES["sense_voice"])
+    model_dir = Path(get_project_dir()) / (asr_entry.get("model_dir") or "")
+    model = _find_model_file(model_dir, files[0]) or model_dir / files[0]
     size = model.stat().st_size if model.exists() else 0
-    absent = [f for f in model_files[1] if not (model_dir / f).exists()]
+    absent = [f for f in files if _find_model_file(model_dir, f) is None]
     ok = size > 100 * 1024 * 1024 and not absent
     if size and not absent:
         detail = f"{model.name} {size // (1024 * 1024)}MB"
@@ -280,9 +311,14 @@ def asr_model_check(asr_entry: dict):
     return {"ok": ok, "detail": detail}
 
 
-ASR_LABELS = {
-    "sherpa_onnx_local": "本地识别 · SenseVoice（sherpa-onnx），不需要联网",
-}
+def asr_label(entry: dict) -> str:
+    if entry.get("type") != "sherpa_onnx_local":
+        return "云端或其他识别服务"
+    model_type = entry.get("model_type") or "sense_voice"
+    name = SHERPA_MODEL_LABELS.get(model_type, model_type)
+    if "x-asr" in str(entry.get("model_dir") or "").lower():
+        name = "X-ASR 中英混合"
+    return f"本地识别 · {name}（sherpa-onnx），不需要联网"
 
 
 def describe_asr(merged: dict) -> dict:
@@ -293,7 +329,7 @@ def describe_asr(merged: dict) -> dict:
         info.append({"label": "模型类型", "value": str(entry["model_type"])})
     return {
         "selected": name,
-        "label": ASR_LABELS.get(entry.get("type"), "云端或其他识别服务"),
+        "label": asr_label(entry),
         "info": info,
         "model": asr_model_check(entry),
         "vad": describe_vad(merged),

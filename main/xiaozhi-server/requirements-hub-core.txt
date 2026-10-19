@@ -19,11 +19,13 @@ Jinja2
 PyJWT
 mcp
 
-# 音频与本地模型：VAD（silero 的 onnx 模型）和 ASR（sherpa-onnx 版 SenseVoice）都只用 onnxruntime，不需要 torch
+# 音频与本地模型：VAD（silero 的 onnx 模型）和 ASR（sherpa-onnx 版 X-ASR / SenseVoice）都只用 onnxruntime，不需要 torch
 opuslib_next
 pydub
 onnxruntime
 sherpa_onnx
+# X-ASR 的热词需要 bpe.vocab，首次加载时用 sentencepiece 从模型自带的 bpe.model 生成
+sentencepiece
 modelscope
 
 # 大模型（OpenAI 兼容接口）与语音合成
