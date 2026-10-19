@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10-3776ab?style=flat-square" />
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-64748b?style=flat-square" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-64748b?style=flat-square" />
   <a href="https://github.com/justhalfbit/xiaozhi-hub-server/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <a href="https://x.com/justhalfbit"><img alt="X (Twitter)" src="https://img.shields.io/badge/X-%40justhalfbit-000000?style=flat-square&logo=x&logoColor=white" /></a>
 </p>
@@ -52,7 +52,7 @@
 
 ### macOS / Linux
 
-需要已安装 git（macOS 没有时运行 `xcode-select --install`）。macOS 上没有 ffmpeg、opus 时，安装脚本用 [Homebrew](https://brew.sh) 安装它们。
+需要已安装 git（macOS 没有时运行 `xcode-select --install`）。macOS 上没有 ffmpeg、opus 时，安装脚本用 [Homebrew](https://brew.sh) 安装它们，所以这种情况下要先装好 Homebrew。
 
 在终端运行这一行。代码会装到 `~/xiaozhi-hub-server`，安装结束时会询问是否开机自启（直接回车就是开启）：
 
@@ -112,7 +112,7 @@ StackChan 的配网步骤、怎么跟设备说话、常见问题，见 **[使用
 
 ## 仓库结构
 
-本项目只运行 `main/xiaozhi-server`，另外用到 `scripts/`（安装、启动、开机自启、更新脚本）和 `hub-docs/`（文档）。其余目录是上游 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 的原样代码（智控台、数字人前端、Docker 部署等），本项目不使用。保留它们是为了定期合并上游时少出冲突，好跟上小智固件的更新。一键安装只下载用到的目录。
+本项目只运行 `main/xiaozhi-server`，另外用到 `scripts/`（安装、启动、开机自启、更新、卸载脚本）和 `hub-docs/`（文档）。其余目录是上游 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 的原样代码（智控台、数字人前端、Docker 部署等），本项目不使用。保留它们是为了定期合并上游时少出冲突，好跟上小智固件的更新。一键安装只下载用到的目录。
 
 ## 许可
 

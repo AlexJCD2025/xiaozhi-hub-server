@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10-3776ab?style=flat-square" />
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-64748b?style=flat-square" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-64748b?style=flat-square" />
   <a href="https://github.com/justhalfbit/xiaozhi-hub-server/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <a href="https://x.com/justhalfbit"><img alt="X (Twitter)" src="https://img.shields.io/badge/X-%40justhalfbit-000000?style=flat-square&logo=x&logoColor=white" /></a>
 </p>
@@ -52,7 +52,7 @@ Requirements:
 
 ### macOS / Linux
 
-You need git (on macOS, run `xcode-select --install` if it is missing). On macOS, the installer uses [Homebrew](https://brew.sh) to install ffmpeg and opus if they are missing.
+You need git (on macOS, run `xcode-select --install` if it is missing). On macOS, the installer uses [Homebrew](https://brew.sh) to install ffmpeg and opus if they are missing, so in that case install Homebrew first.
 
 Run this line in a terminal. It installs to `~/xiaozhi-hub-server` and, at the end, asks whether to start the server automatically at login (press Enter to accept):
 
@@ -112,7 +112,7 @@ For StackChan setup steps, how to talk to the device, and the FAQ, see the **[us
 
 ## Repository layout
 
-This project only runs `main/xiaozhi-server`, plus `scripts/` (install, start, autostart and update scripts) and `hub-docs/` (documentation). The other directories are unchanged code from the upstream [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (management console, digital human front end, Docker deployment, and so on) and are not used. They are kept so that regular merges from upstream, which keep up with Xiaozhi firmware updates, produce fewer conflicts. The one-line installer downloads only the directories that are used.
+This project only runs `main/xiaozhi-server`, plus `scripts/` (install, start, autostart, update and uninstall scripts) and `hub-docs/` (documentation). The other directories are unchanged code from the upstream [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (management console, digital human front end, Docker deployment, and so on) and are not used. They are kept so that regular merges from upstream, which keep up with Xiaozhi firmware updates, produce fewer conflicts. The one-line installer downloads only the directories that are used.
 
 ## License
 
