@@ -75,6 +75,8 @@ def test_timeline_follows_config(cli_path):
     assert any("2 小时" in x for x in steps["第一句话"])  # resume_window_minutes 默认 120
     assert not any("API 模型" in x for x in steps["第一句话"])  # 没有叫到 API 模型
     assert any("5 分钟" in x for x in steps["结束"])  # idle_timeout_seconds 默认 300
+    assert any("2 分钟没人说话" in x for x in steps["结束"])  # close_connection_no_voice_time 默认 120
+    assert any(x.startswith("3 分钟没有任何动静") for x in steps["结束"])  # 第二道：再加 60 秒兜底
     intent = next(s for s in flow["stages"] if s["id"] == "intent")
     assert intent["params"][0]["label"] == "呼名" and "只说称呼" in [b["title"] for b in flow["branches"]]
 

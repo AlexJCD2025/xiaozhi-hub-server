@@ -172,7 +172,7 @@ def describe_flow(merged: dict) -> dict:
     ] if calls["enabled"] else []) + [
         {"title": "唤醒词", "text": "说唤醒词（例如“嘿，你好呀”）时不经过大模型，直接播放缓存的回复，例如“您请说，我正听着。”"},
         {"title": "退出指令", "text": f"整句话是“{'”“'.join(merged.get('exit_commands') or [])}”时立即断开连接，没有回复"},
-        {"title": "长时间不说话", "text": f"{merged.get('close_connection_no_voice_time', 120)} 秒没人说话，大模型说一句告别语后断开"},
+        {"title": "长时间不说话", "text": "；".join(_idle_close(merged))},
     ]
     if is_cli:
         branches += [
@@ -203,6 +203,22 @@ def _duration(seconds) -> str:
         minutes = int(seconds // 60)
         return f"{minutes // 60} 小时" if minutes % 60 == 0 else f"{minutes} 分钟"
     return f"{int(seconds)} 秒"
+
+
+def _idle_close(merged: dict) -> list:
+    """两道"没人说话就断开"：第一道说告别语，第二道兜底直接断开。两道看的是同一个"最后活动时间"。"""
+    first = int(merged.get("close_connection_no_voice_time", 120) or 120)
+    end_prompt = merged.get("end_prompt") or {}
+    if end_prompt.get("enable", True) is False:
+        action = "直接断开"
+    elif end_prompt.get("reply"):
+        action = f"说一句“{end_prompt['reply']}”后断开"
+    else:
+        action = "让大模型说一句告别语后断开"
+    return [
+        f"设备在收音、但 {_duration(first)}没人说话：{action}",
+        f"{_duration(first + 60)}没有任何动静（设备没发声音和文字、服务端也没在说话）：兜底直接断开，没有告别语",
+    ]
 
 
 def describe_timeline(merged: dict, calls: dict) -> list:
@@ -257,7 +273,7 @@ def describe_timeline(merged: dict, calls: dict) -> list:
     during.append("打断：设备说话时点一下屏幕上的脸，或说唤醒词")
     steps.append({"title": "对话中", "who": "服务端", "items": during})
 
-    end = [f"{_duration(merged.get('close_connection_no_voice_time', 120))}没人说话：说一句告别语后断开"]
+    end = _idle_close(merged)
     if cli_names:
         end.append(f"Claude Code 进程空闲 {_duration(idle)}或设备断开时关闭；切到别的模型后不马上关，等空闲超时再关，方便切回来")
         end.append("进程因空闲关闭后再说话：重新启动进程，按“第一句话”的规则判断接续")
