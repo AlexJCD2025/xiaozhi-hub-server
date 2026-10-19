@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source srcset="docs/hub/logo-dark.svg" media="(prefers-color-scheme: dark)">
-    <source srcset="docs/hub/logo-light.svg" media="(prefers-color-scheme: light)">
-    <img src="docs/hub/logo-light.svg" alt="xiaozhi-hub-server">
+    <source srcset="hub-docs/images/logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="hub-docs/images/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="hub-docs/images/logo-light.svg" alt="xiaozhi-hub-server">
   </picture>
 </p>
 <p align="center">Talk to Claude Code and other LLMs on your own computer through a Xiaozhi device.</p>
@@ -17,10 +17,10 @@
   <a href="README.en.md">English</a>
 </p>
 <p align="center">
-  <a href="docs/hub-server.md">User guide</a> · <a href="DESIGN.md">Design notes</a> (both in Chinese)
+  <a href="hub-docs/guide.md">User guide</a> · <a href="hub-docs/design.md">Design notes</a> (both in Chinese)
 </p>
 
-[![Admin console](docs/hub/admin.png)](docs/hub-server.md)
+[![Admin console](hub-docs/images/admin.png)](hub-docs/guide.md)
 
 ---
 
@@ -28,16 +28,16 @@ A **local hub server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and
 
 > A community project compatible with the Xiaozhi protocol. Not an official Xiaozhi project.
 
-> Want to know **why things work the way they do**—what happens from wake word to disconnect, when the device connection drops, when the Claude Code process starts and stops, what is written to disk, and why API models cannot resume a conversation? See the [design notes](DESIGN.md) (Chinese).
+> Want to know **why things work the way they do**—what happens from wake word to disconnect, when the device connection drops, when the Claude Code process starts and stops, what is written to disk, and why API models cannot resume a conversation? See the [design notes](hub-docs/design.md) (Chinese).
 
 ## Features
 
 - **Voice access to your local Claude Code**: talk to the Claude Code you are already signed in to, and let it read files in its working directory and carry out tasks.
   - One long-running process per device, so replies come fast.
   - Interrupt the device while it speaks (on StackChan, tap the face on the screen or say the wake word), then keep talking.
-  - Conversation resume: picks up automatically after a reconnect, and you can say "接着上次聊" ("continue where we left off") to resume an earlier conversation. → [DESIGN.md §6](DESIGN.md#6-会话接续只对-claude-code)
+  - Conversation resume: picks up automatically after a reconnect, and you can say "接着上次聊" ("continue where we left off") to resume an earlier conversation. → [design.md §6](hub-docs/design.md#6-会话接续只对-claude-code)
 - **Other LLMs too**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
-- **Switch models by name**: after waking the device, say "嗨 + a name" (e.g. "Hey Claude", "Hey DeepSeek") to hand the conversation to that model. Each device remembers the model it used last, and each model only remembers its own conversations. Names can be recorded in the admin console by speaking to the device, so they match your pronunciation. → [DESIGN.md §5](DESIGN.md#5-呼名与多模型路由)
+- **Switch models by name**: after waking the device, say "嗨 + a name" (e.g. "Hey Claude", "Hey DeepSeek") to hand the conversation to that model. Each device remembers the model it used last, and each model only remembers its own conversations. Names can be recorded in the admin console by speaking to the device, so they match your pronunciation. → [design.md §5](hub-docs/design.md#5-呼名与多模型路由)
 - **Local speech recognition**: the recognition model runs on your machine, no internet needed. Speech synthesis uses EdgeTTS with a choice of voices.
 - **Web admin console**:
   - Set up LLMs and API keys; choose the model, thinking level and permission level for Claude Code.
@@ -65,7 +65,7 @@ After it starts, the terminal shows two addresses:
 
 ## Connecting a device
 
-When setting up the device's network, enter the OTA address above under "Advanced options" on the setup page. For StackChan step by step, FAQ and more settings, see the **[user guide](docs/hub-server.md)** (Chinese).
+When setting up the device's network, enter the OTA address above under "Advanced options" on the setup page. For StackChan step by step, FAQ and more settings, see the **[user guide](hub-docs/guide.md)** (Chinese).
 
 ## Security
 
@@ -80,13 +80,13 @@ This project only runs `main/xiaozhi-server`. When the Xiaozhi firmware changes,
 | --- | --- |
 | `main/xiaozhi-server` | **Used**: the server itself; all changes in this project live here |
 | `scripts/` | **Used**: this project's install and start scripts |
-| `docs/hub-server.md`, `docs/hub/`, `DESIGN.md`, `README.en.md` | **Used**: this project's user guide, README images, design notes and English README |
+| `hub-docs/`, `README.en.md` | **Used**: this project's documents (user guide, design notes, README images) and English README |
 | `main/manager-api`, `main/manager-web`, `main/manager-mobile` | Not used: the upstream management console, replaced by this project's own web admin console |
 | `main/digital-human` | Not used: the upstream digital human front end |
-| `main/README.md`, `main/README_en.md`, other documents under `docs/` | Not used: upstream documentation, partly not applicable to this project |
+| `main/README.md`, `main/README_en.md`, `docs/` | Not used: upstream documentation, partly not applicable to this project |
 | `Dockerfile-*`, `docker-setup.sh`, `.dockerignore` | Not used: upstream Docker deployment |
 | `Makefile` | Not used: the upstream test entry point (including Java and front-end tests for the management console) |
 
 ## License
 
-[MIT License](LICENSE). This project is based on [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (MIT). Third-party credits are listed in the [user guide](docs/hub-server.md#致谢与许可).
+[MIT License](LICENSE). This project is based on [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) (MIT). Third-party credits are listed in the [user guide](hub-docs/guide.md#致谢与许可).

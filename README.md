@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source srcset="docs/hub/logo-dark.svg" media="(prefers-color-scheme: dark)">
-    <source srcset="docs/hub/logo-light.svg" media="(prefers-color-scheme: light)">
-    <img src="docs/hub/logo-light.svg" alt="xiaozhi-hub-server">
+    <source srcset="hub-docs/images/logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="hub-docs/images/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="hub-docs/images/logo-light.svg" alt="xiaozhi-hub-server">
   </picture>
 </p>
 <p align="center">让小智设备用语音指挥你电脑上的 Claude Code 和大模型。</p>
@@ -17,10 +17,10 @@
   <a href="README.en.md">English</a>
 </p>
 <p align="center">
-  <a href="docs/hub-server.md">使用说明</a> · <a href="DESIGN.md">设计细节</a>
+  <a href="hub-docs/guide.md">使用说明</a> · <a href="hub-docs/design.md">设计细节</a>
 </p>
 
-[![管理后台](docs/hub/admin.png)](docs/hub-server.md)
+[![管理后台](hub-docs/images/admin.png)](hub-docs/guide.md)
 
 ---
 
@@ -28,16 +28,16 @@
 
 > 兼容小智协议的社区项目，不是小智官方项目。
 
-> 想知道每一处**为什么这样做**——一次对话从唤醒到断开经过了什么、设备和服务端的连接什么时候断、Claude Code 进程什么时候启动和关闭、什么落盘什么不落盘、为什么 API 模型不能接续——见 [设计细节](DESIGN.md)。
+> 想知道每一处**为什么这样做**——一次对话从唤醒到断开经过了什么、设备和服务端的连接什么时候断、Claude Code 进程什么时候启动和关闭、什么落盘什么不落盘、为什么 API 模型不能接续——见 [设计细节](hub-docs/design.md)。
 
 ## 功能
 
 - **语音接入本机 Claude Code**：用说话的方式和本机已登录的 Claude Code 对话，让它读取工作目录里的文件、执行任务。
   - 每台设备对应一个常驻进程，回复快。
   - 设备说话时可以打断（StackChan 点一下屏幕上的脸，或喊唤醒词），打断后能接着聊。
-  - 支持上下文接续：断线重连后自动接上，也可以说"接着上次聊"接续更早的对话。→ [DESIGN.md §6](DESIGN.md#6-会话接续只对-claude-code)
+  - 支持上下文接续：断线重连后自动接上，也可以说"接着上次聊"接续更早的对话。→ [design.md §6](hub-docs/design.md#6-会话接续只对-claude-code)
 - **也能用其他大模型**：Claude、OpenAI、Gemini、DeepSeek、通义千问、豆包、智谱 GLM、Kimi，以及任意 OpenAI 兼容接口。
-- **呼名切换模型**：唤醒后说"嗨 + 称呼"（如"嗨 Claude""嗨 DeepSeek"），就换成对应的模型回答，每台设备记住上次用的模型；每个模型只记得跟自己的对话。称呼可以在管理后台对着设备录入，按你的发音来认。→ [DESIGN.md §5](DESIGN.md#5-呼名与多模型路由)
+- **呼名切换模型**：唤醒后说"嗨 + 称呼"（如"嗨 Claude""嗨 DeepSeek"），就换成对应的模型回答，每台设备记住上次用的模型；每个模型只记得跟自己的对话。称呼可以在管理后台对着设备录入，按你的发音来认。→ [design.md §5](hub-docs/design.md#5-呼名与多模型路由)
 - **本地语音识别**：SenseVoice 模型在本机运行，不需要联网。语音合成使用 EdgeTTS，可选多种音色。
 - **网页管理后台**：
   - 设置大模型和 API Key；Claude Code 可选模型、思考级别、权限级别。
@@ -65,7 +65,7 @@ bash scripts/start.sh     # 启动
 
 ## 连接设备
 
-设备配网时，在配网页的"高级选项"里填写上面的 OTA 地址。StackChan 的具体步骤、常见问题和更多配置，见 **[使用说明](docs/hub-server.md)**。
+设备配网时，在配网页的"高级选项"里填写上面的 OTA 地址。StackChan 的具体步骤、常见问题和更多配置，见 **[使用说明](hub-docs/guide.md)**。
 
 ## 安全提示
 
@@ -80,13 +80,13 @@ bash scripts/start.sh     # 启动
 | --- | --- |
 | `main/xiaozhi-server` | **用到**：服务端本体，本项目的改动都在这里 |
 | `scripts/` | **用到**：本项目的安装和启动脚本 |
-| `docs/hub-server.md`、`docs/hub/`、`DESIGN.md`、`README.en.md` | **用到**：本项目的使用说明、README 图片、设计细节和英文 README |
+| `hub-docs/`、`README.en.md` | **用到**：本项目的文档（使用说明、设计细节、README 图片）和英文 README |
 | `main/manager-api`、`main/manager-web`、`main/manager-mobile` | 未用到：上游的智控台，本项目用自带的网页管理后台代替 |
 | `main/digital-human` | 未用到：上游的数字人前端 |
-| `main/README.md`、`main/README_en.md`、`docs/` 下的其他文档 | 未用到：上游的说明文档，部分内容不适用于本项目 |
+| `main/README.md`、`main/README_en.md`、`docs/` | 未用到：上游的说明文档，部分内容不适用于本项目 |
 | `Dockerfile-*`、`docker-setup.sh`、`.dockerignore` | 未用到：上游的 Docker 部署 |
 | `Makefile` | 未用到：上游的测试入口（含智控台的 Java、前端测试） |
 
 ## 许可
 
-[MIT License](LICENSE)。本项目基于 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（MIT）改造，第三方组件的致谢见[使用说明](docs/hub-server.md#致谢与许可)。
+[MIT License](LICENSE)。本项目基于 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（MIT）改造，第三方组件的致谢见[使用说明](hub-docs/guide.md#致谢与许可)。
