@@ -28,54 +28,10 @@
 
 ## 1. 三方和两段关系
 
-下图是三方之间的连接、服务端内部的主要模块，以及状态存在哪。橙色边框是本项目新增的模块，圆柱是保存状态的地方（哪些重启后还在，见 [§11](#11-什么保存什么不保存)）。
-
-```mermaid
-flowchart TB
-    dev["小智设备<br/>StackChan 等"]
-    browser["浏览器"]
-
-    subgraph hub["本机：xiaozhi-hub-server（main/xiaozhi-server）"]
-        http["HTTP 服务：OTA、管理后台<br/>core/http_server.py、core/admin/"]
-        ws["WebSocket 连接<br/>core/connection.py"]
-        asr["语音检测、语音识别<br/>core/providers/vad、asr"]
-        asrtext["热词、纠错<br/>core/agent/asr_text.py"]
-        callname["呼名<br/>core/agent/call_names.py"]
-        router["多模型路由<br/>core/agent/llm_router.py"]
-        apillm["API 模型<br/>core/providers/llm/openai 等"]
-        cli["Claude Code 会话<br/>core/providers/llm/claude_cli<br/>core/agent/claude_session.py"]
-        tts["表情、语音合成<br/>core/providers/tts"]
-        mem[("连接内存<br/>API 模型的对话记录<br/>当前模型、用过的实例")]
-        store[("data/agent_sessions.json<br/>上次用的模型、Claude 会话 ID")]
-        cfg[("data/.config.yaml<br/>全部设置")]
-
-        ws --> asr --> asrtext --> callname --> router
-        router --> apillm
-        router --> cli
-        apillm --> tts
-        cli --> tts
-        tts --> ws
-        router -.- mem
-        router -.- store
-        cli -.- store
-        http -.- cfg
-    end
-
-    vendor["模型厂商 API<br/>DeepSeek、通义千问等"]
-    cc["Claude Code 进程<br/>本机常驻"]
-    ccs[("Claude Code 的会话<br/>本机硬盘")]
-    anthropic["Anthropic"]
-
-    dev <==>|WebSocket 长连接| ws
-    dev -->|配网时取连接地址| http
-    browser -->|管理后台| http
-    apillm -->|每句话一次 HTTP 请求| vendor
-    cli <-->|进程的输入输出| cc
-    cc --> anthropic
-    cc -.- ccs
-
-    classDef hubnew stroke:#e8590c,stroke-width:3px
-    class asrtext,callname,router,cli hubnew
+```
+设备（StackChan）  ⇄  本地服务端（本项目）  ⇄  大模型
+        WebSocket 长连接             API 模型：每句话一次 HTTP 请求
+                                     Claude Code：本机常驻进程，通过进程的输入输出通信
 ```
 
 两段关系的性质完全不同：
@@ -88,45 +44,6 @@ flowchart TB
 ---
 
 ## 2. 一次对话的完整经过
-
-下图按时间顺序画出一次对话里设备、服务端和两类模型之间的往来，编号对应下表的步骤。例子里先交给 Claude Code，再叫 DeepSeek 切过去。
-
-```mermaid
-sequenceDiagram
-    participant D as 设备
-    participant S as 服务端
-    participant C as Claude Code 进程
-    participant A as API 模型
-
-    Note over D,A: 1. 唤醒
-    Note over D: 固件识别"Hi, StackChan"
-    D->>S: 建立 WebSocket 连接
-    D->>S: 唤醒词当作一句话发来
-    S-->>D: 播放缓存的问候，不经过大模型
-
-    Note over D,A: 2. 恢复上次的模型
-    Note over S: 切到这台设备上次用的模型（这里是 Claude Code），不启动进程
-
-    Note over D,A: 4. 第一句话
-    D->>S: 说话
-    S->>C: 启动进程，决定接上旧会话还是新开
-    S->>C: 只发这一句
-    C-->>S: 流式回复
-    S-->>D: 语音
-
-    Note over D,A: 5. 对话中（这句用 3. 叫模型切换）
-    D->>S: "嗨 DeepSeek，……"
-    Note over S: 去掉称呼，切到 DeepSeek 并记住。Claude Code 进程不关，等空闲超时
-    S->>A: 系统提示 + 本次连接里和它的对话 + 这句话
-    A-->>S: 流式回复，这次请求结束
-    S-->>D: 语音
-
-    Note over D,A: 6. 结束
-    Note over D,S: 没人说话、退出指令、设备休眠或断网
-    S--)D: 断开连接
-    S->>C: 通知用过的每个模型，关闭进程（会话留在本机硬盘）
-    Note over S,A: API 模型的对话记录随连接清空
-```
 
 | 步骤 | 谁在做 | 发生什么 |
 | --- | --- | --- |
@@ -144,33 +61,6 @@ sequenceDiagram
 ## 3. 一句话的处理流程
 
 一句话从设备的麦克风到设备的喇叭，依次经过下面几步。大部分是上游原有的处理，本项目改动的地方单独标出。
-
-图里橙色边框的是本项目改动或新增的步骤，圆角框是到此为止、不再往下走的情况。
-
-```mermaid
-flowchart TD
-    mic["收音<br/>Opus 每 60ms 一包，解码成 16kHz"] --> vad["语音检测 VAD<br/>安静 800ms 判定这句说完"]
-    vad --> asr["语音识别 X-ASR<br/>按纠错表替换"]
-    asr -->|没有文字| drop(["到此为止"])
-    asr -->|"有文字，发 stt 给设备显示"| route{"呼名、指令"}
-    route -->|嗨 + 称呼| switch["切到对应的模型并记住"]
-    switch -->|只说称呼| ack(["回一声“我在”"])
-    switch -->|带了内容，去掉称呼| intent
-    route -->|退出指令| bye(["断开连接"])
-    route -->|唤醒词| greet(["播放缓存的问候"])
-    route -->|其他| intent["意图识别<br/>nointent 或 function_call"]
-    intent --> llm{"当前模型"}
-    llm -->|API 模型| api["系统提示 + 本次连接的对话 + 这句话<br/>HTTP 流式返回"]
-    llm -->|Claude Code| cc["只发这句话<br/>本机常驻进程"]
-    api --> emo["表情<br/>第一个 emoji 对应成情绪，发 llm 换脸"]
-    cc --> emo
-    emo --> tts["语音合成<br/>边收边切句，逐句合成 Opus"]
-    tts --> play["播放<br/>每句先补缓冲到 15 包，再按 60ms 匀速发<br/>播完发 tts stop"]
-    play -.->|设备回到收音| mic
-
-    classDef hub stroke:#e8590c,stroke-width:3px
-    class vad,asr,route,switch,cc,emo,play hub
-```
 
 | 步骤 | 做什么 | 本项目的改动 |
 | --- | --- | --- |
