@@ -50,6 +50,20 @@ bash scripts/start.sh     # 启动
 - 服务只应在局域网内使用，不要暴露到公网。
 - Claude Code 默认只能访问工作目录 `~/xiaozhi-workspace`，只开放只读工具。放开写入、执行命令等权限后，语音指令就能修改文件、执行命令，请谨慎。
 
+## 仓库里哪些目录用到了
+
+本项目只运行 `main/xiaozhi-server`。为了方便同步上游，上游的其他代码原样保留但没有用到，不需要关心：
+
+| 目录 / 文件 | 说明 |
+| --- | --- |
+| `main/xiaozhi-server` | **用到**：服务端本体，本项目的改动都在这里 |
+| `scripts/` | **用到**：本项目的安装和启动脚本 |
+| `docs/hub-server.md`、`DESIGN.md` | **用到**：本项目的使用说明和设计细节 |
+| `main/manager-api`、`main/manager-web`、`main/manager-mobile` | 未用到：上游的智控台，本项目用自带的网页管理后台代替 |
+| `main/digital-human` | 未用到：上游的数字人前端 |
+| `main/README.md`、`main/README_en.md`、`docs/` 下的其他文档 | 未用到：上游的说明文档，部分内容不适用于本项目 |
+| `Dockerfile-*`、`docker-setup.sh`、`Makefile`、`.dockerignore` | 未用到：上游的 Docker 部署 |
+
 ## 许可
 
 [MIT License](LICENSE)。本项目基于 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（MIT）改造，第三方组件的致谢见[使用说明](docs/hub-server.md#致谢与许可)。
