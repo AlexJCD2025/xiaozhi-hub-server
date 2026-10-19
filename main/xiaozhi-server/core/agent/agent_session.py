@@ -49,10 +49,17 @@ class Activity:
 
     tools_running：正在执行、还没返回结果的工具数；-1 表示不知道。工具执行期间（例如跑一条很慢的命令）
     Agent 可能很久没有任何事件，这不算卡住。
+
+    label 在 STARTING_LABELS 里时，表示会话已经建好、但 Agent 还没开始干活（刚启动、请求被限流或过载正在重试）。
+    这之后直接出错，就是"还没开始干活就出错"（没登录、额度用完、重试用完等）。
     """
 
     label: str = ""
     tools_running: int = -1
+
+
+# 还没开始干活的 Activity：init 是会话刚启动，api_retry 是请求被限流或过载、正在重试
+STARTING_LABELS = ("init", "api_retry")
 
 
 @dataclass

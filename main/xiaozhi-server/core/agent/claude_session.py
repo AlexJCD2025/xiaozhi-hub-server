@@ -35,6 +35,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk import ClaudeSDKError
 
 from core.agent.agent_session import (
+    STARTING_LABELS,
     Activity,
     AgentEvent,
     AgentSession,
@@ -289,10 +290,12 @@ class ClaudeSession(AgentSession):
                 is_text = isinstance(msg, StreamEvent) and ((msg.event or {}).get("delta") or {}).get("type") == "text_delta"
                 # 初始化单独报一次 label 为 init 的 Activity：这时会话已经建好、用户的话已经存进去，但 Claude 还没开始干活。
                 # 实测没登录时是 init → 伪装成 assistant 的错误 → result；和 Anthropic 的网络卡住时只有 init，之后没有动静。
-                # 上层靠 init 之后来的是错误还是别的事件来区分这两种情况（见 claude_cli 的 _run_turn）
-                if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                # 上层靠 init 之后来的是错误还是别的事件来区分这两种情况（见 claude_cli 的 _run_turn）。
+                # 限流（429）、过载（529）时实测是 init → api_retry × N → 伪装成 assistant 的错误 → result：重试也还没开始干活，
+                # 同样单独报（label 为 api_retry，不节流）。重试间隔会越来越长，照常报 Activity 才不会被当成卡住
+                if isinstance(msg, SystemMessage) and msg.subtype in STARTING_LABELS:
                     last_activity = time.monotonic()
-                    yield Activity("init", tools_running=len(pending_tools))
+                    yield Activity(msg.subtype, tools_running=len(pending_tools))
                     continue
                 # 不算在干活：限流信息、收尾的结果，以及伪装成 assistant 消息的错误（没登录、额度用完等），不报 Activity
                 not_work = isinstance(msg, (RateLimitEvent, ResultMessage)) or (

@@ -128,6 +128,20 @@ async def test_auth_error_reports_only_init_activity(monkeypatch):
     assert [e.kind for e in evs if isinstance(e, Error)][0] == ErrorKind.AUTH
 
 
+async def test_api_retry_reported_as_its_own_activity(monkeypatch):
+    """限流（429）、过载（529）时 CLI 先重试，实测顺序：init → api_retry × N → 伪装成 assistant 的错误 → result。
+    重试期间要照常报 Activity（重试间隔会越来越长，不报会被当成卡住），但 label 是 api_retry，上层才知道 Claude 还没开始干活。"""
+    monkeypatch.setattr(cs_mod, "time", SteppingClock())
+    retry = {"attempt": 1, "max_retries": 2, "error_status": 429, "error": "rate_limit"}
+    s = session_with([SystemMessage("init", {"model": "claude-haiku"}),
+                      SystemMessage("api_retry", retry), SystemMessage("api_retry", {**retry, "attempt": 2}),
+                      assistant(TextBlock("API Error: Request rejected (429)"), model="<synthetic>", error="rate_limit"),
+                      result(is_error=True)])
+    evs = await collect(s)
+    assert [e.label for e in evs if type(e).__name__ == "Activity"] == ["init", "api_retry", "api_retry"]
+    assert [e.kind for e in evs if isinstance(e, Error)][0] == ErrorKind.RATE_LIMIT
+
+
 async def test_interrupted_result_is_done_not_error():
     s = session_with([delta("🙂一"), result(is_error=True, subtype="error_during_execution")])
     s._interrupting = True  # 模拟 send 过程中被打断：send 开头会重置，这里改由 FakeClient 设置
@@ -376,6 +390,17 @@ def conn(sid="conn-1", device="dev-1", intent="nointent"):
 def run(p, c, text, system="你是小智"):
     return "".join(p.response(c.session_id, [{"role": "system", "content": system},
                                              {"role": "user", "content": text}]))
+
+
+def wait_turn_done(p, c, timeout=3.0):
+    """response() 收到错误就返回了，_run_turn 还可能在后台线程里收尾（例如恢复会话记录）：等这一轮真正结束再断言。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        task = p._states[c.session_id].turn_task
+        if task is not None and task.done():
+            return
+        time.sleep(0.01)
+    raise AssertionError("这一轮在后台一直没有结束")
 
 
 def test_effort_defaults_to_low(provider, tmp_path):
@@ -705,14 +730,17 @@ def test_notice_not_glued_to_half_sentence(provider):
     assert run(provider, c, "看看").startswith("🙂我先看一下文件。这件事做得太久")
 
 
-def test_session_not_recorded_when_first_event_is_error(provider):
-    """一开始就出错（例如没登录）时不记，免得覆盖之前能接续的会话。"""
-    provider.store.touch("dev-1", "old-session")
-    FakeAgent.script = [[Error(ErrorKind.AUTH, "not logged in")]]
+def test_resumed_session_record_unchanged_when_not_logged_in(provider):
+    """自动接上旧会话后没登录：记录原样保留，最后活跃时间也不刷新（不能因为一次失败把接续窗口往后延）。"""
+    last = time.time() - 600
+    provider.store.touch("dev-1", "old-session", now=last)
+    FakeAgent.script = [list(NOT_LOGGED_IN)]
     c = conn()
     provider.on_conn_open(c)
     run(provider, c, "你好")
-    assert provider.store.get("dev-1")["session_id"] == "old-session"
+    wait_turn_done(provider, c)
+    assert FakeAgent.instances[0].resume_id == "old-session"  # 确实走的是接续
+    assert provider.store.get("dev-1") == {"session_id": "old-session", "last_active": last}
 
 
 NOT_LOGGED_IN = [Activity("init"), Error(ErrorKind.AUTH, "Not logged in"), Error(ErrorKind.UNKNOWN, "success: ")]
@@ -727,6 +755,7 @@ def test_expired_session_restored_when_new_session_fails(provider):
     c = conn()
     provider.on_conn_open(c)
     run(provider, c, "你好")
+    wait_turn_done(provider, c)
     assert FakeAgent.instances[0].resume_id is None  # 确实走的是新开会话
     assert provider.store.get("dev-1") == {"session_id": "old-session", "last_active": old}
 
@@ -737,7 +766,32 @@ def test_no_record_left_when_first_session_fails(provider):
     c = conn()
     provider.on_conn_open(c)
     run(provider, c, "你好")
+    wait_turn_done(provider, c)
     assert provider.store.get("dev-1") is None
+
+
+@pytest.mark.parametrize("kind", [ErrorKind.RATE_LIMIT, ErrorKind.SERVER])
+def test_expired_session_restored_when_retries_exhausted(provider, kind):
+    """新会话第一轮遇到限流或过载，重试用完后出错：重试不算开始干活，旧记录原样恢复。"""
+    old = time.time() - 10 * 3600
+    provider.store.touch("dev-1", "old-session", now=old)
+    FakeAgent.script = [[Activity("init"), Activity("api_retry"), Activity("api_retry"), Error(kind, "API Error"),
+                         Error(ErrorKind.UNKNOWN, "success: ")]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    wait_turn_done(provider, c)
+    assert provider.store.get("dev-1") == {"session_id": "old-session", "last_active": old}
+
+
+def test_session_kept_when_interrupted_after_init(provider):
+    """网络卡住时打断（实测中断后收到 UserMessage 的 Activity 和 Done(interrupted)）：不算出错，新会话照常记下。"""
+    FakeAgent.script = [[Activity("init"), Activity("UserMessage"), Done(interrupted=True)]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    wait_turn_done(provider, c)
+    assert provider.store.get("dev-1")["session_id"] == "new-0"
 
 
 def test_session_kept_when_error_after_claude_started(provider):
