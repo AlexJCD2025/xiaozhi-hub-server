@@ -47,18 +47,28 @@ A **local hub server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and
   - Pick and preview a TTS voice, configure intent recognition.
   - See environment checks and online devices, and send test expressions to a device.
   - A "How it works" page shows the full path of one sentence from the device to playback, and the prompt sent to the LLM.
-- **One-command install and start**: a single command on macOS / Linux sets up Python, dependencies and the speech recognition model.
+- **One-command install, autostart and update**: a single command on macOS / Linux sets up Python, dependencies and the speech recognition model; optionally starts at login, and one command updates to the latest version.
 
 ## Quick start
 
 Requirements: macOS or Linux (the Windows script has not been tested), with the computer and the device on the same LAN. To use Claude Code, install it first and run `claude` once in a terminal to sign in.
 
+Run this line in a terminal. It downloads the code to `~/xiaozhi-hub-server` and installs it, and at the end asks whether to start the server automatically at login:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
+```
+
+If you prefer not to pipe into bash, download and install manually:
+
 ```bash
 git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
 cd xiaozhi-hub-server
 bash scripts/install.sh   # install
-bash scripts/start.sh     # start
+bash scripts/start.sh     # start (if autostart is not enabled)
 ```
+
+To update to the latest version later: `bash ~/xiaozhi-hub-server/scripts/update.sh` (use your own directory if you cloned manually).
 
 After it starts, the terminal shows two addresses:
 
@@ -81,7 +91,7 @@ This project only runs `main/xiaozhi-server`. When the Xiaozhi firmware changes,
 | Directory / file | Notes |
 | --- | --- |
 | `main/xiaozhi-server` | **Used**: the server itself; all changes in this project live here |
-| `scripts/` | **Used**: this project's install and start scripts |
+| `scripts/` | **Used**: this project's install, start, autostart and update scripts |
 | `hub-docs/`, `README.en.md` | **Used**: this project's documents (user guide, design notes, README images) and English README |
 | `main/manager-api`, `main/manager-web`, `main/manager-mobile` | Not used: the upstream management console, replaced by this project's own web admin console |
 | `main/digital-human` | Not used: the upstream digital human front end |
