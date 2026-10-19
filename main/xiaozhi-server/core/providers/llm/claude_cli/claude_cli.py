@@ -360,18 +360,26 @@ class LLMProvider(LLMProviderBase):
                 if await self._ensure_agent(st, text, out, system_prompt):
                     self.store.touch(st.key, st.agent.session_id)
                     return
-                agent, recorded = st.agent, False
+                agent, recorded, working, failed, previous = st.agent, False, False, False, None
                 async for ev in agent.send(text):
-                    if not recorded and isinstance(ev, (TextDelta, Activity)):
-                        # Claude 已经开始处理（说话或干活），会话已存在于本机。马上记下来：这一轮如果超时卡死、进程被强制关闭，
-                        # 下一句话启动新进程时也能接回这个会话（原来要等一轮正常结束才记，新会话的第一轮卡死就接不上了）。
-                        # 只有错误和收尾的 Done 时不记（例如没登录），免得覆盖之前能接续的会话
-                        self.store.touch(st.key, agent.session_id)
-                        recorded = True
+                    if isinstance(ev, Error) and not working and ev.kind != ErrorKind.PROCESS_EXITED:
+                        failed = True  # 还没开始干活就出错：没登录、额度用完等
+                    elif not failed and isinstance(ev, (TextDelta, Activity)):
+                        if not recorded:
+                            # 会话已存在于本机（init 时用户的话就已存进去）。马上记下来：这一轮如果卡死（例如和 Anthropic 的
+                            # 网络卡住，只收到 init）、进程被强制关闭，下一句话启动新进程时也能接回这个会话
+                            previous = self.store.get(st.key)
+                            self.store.touch(st.key, agent.session_id)
+                            recorded = True
+                        working = working or not (isinstance(ev, Activity) and ev.label == "init")
                     out.put(ev)
                     if isinstance(ev, Error) and ev.kind == ErrorKind.PROCESS_EXITED:
                         st.agent = None
-                if recorded and st.agent:
+                if failed:
+                    # 还没开始干活就出错：恢复原来的记录，免得新会话覆盖之前能接续的会话（包括最后活跃时间）
+                    if recorded:
+                        self._restore_record(st.key, previous)
+                elif recorded and st.agent:
                     self.store.touch(st.key, st.agent.session_id)  # 更新最后活跃时间
             except AgentSessionError as e:
                 out.put(Error(e.kind, e.detail))
@@ -488,6 +496,13 @@ class LLMProvider(LLMProviderBase):
     def _aborted(st: ConnState) -> bool:
         """设备是否打断了这一轮。打断时服务端会把连接的 client_abort 置为 True，新的一句话开始时清掉。"""
         return bool(getattr(st.conn, "client_abort", False))
+
+    def _restore_record(self, key: str, previous: Optional[dict]) -> None:
+        """把这台设备的会话记录恢复成这一轮开始前的样子；原来没有记录就删掉。"""
+        if previous and previous.get("session_id"):
+            self.store.touch(key, previous["session_id"], now=previous.get("last_active"))
+        else:
+            self.store.forget(key)
 
     @staticmethod
     def _keep_alive(st: ConnState) -> None:

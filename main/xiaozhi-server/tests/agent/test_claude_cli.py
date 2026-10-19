@@ -10,7 +10,7 @@ from claude_agent_sdk import (AssistantMessage, RateLimitEvent, ResultMessage, S
                               ToolResultBlock, ToolUseBlock, UserMessage)
 
 from core.agent import claude_session as cs_mod
-from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
+from core.agent.agent_session import Activity, AgentSessionError, Done, Error, ErrorKind, TextDelta
 from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
 from core.agent.voice_commands import match_resume
@@ -100,15 +100,31 @@ async def test_synthetic_error_message_not_spoken():
     assert errors and errors[0].kind == ErrorKind.RATE_LIMIT
 
 
-async def test_no_activity_before_auth_error():
-    """没登录时 Claude 根本没开始干活：初始化消息、限流信息和伪装成 assistant 的错误消息都不算 Activity，
-    否则上层会以为这一轮已经开始，把新会话 ID 记下来，覆盖之前能接续的会话。"""
+class SteppingClock:
+    """每次取 monotonic 都前进 5 秒：让每条消息都超过 Activity 的 1 秒节流，测出哪些消息会报 Activity。"""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def monotonic(self):
+        self.t += 5
+        return self.t
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+async def test_auth_error_reports_only_init_activity(monkeypatch):
+    """没登录时（实测的消息顺序：init → 伪装成 assistant 的错误 → result）只在初始化时报一次 Activity，
+    label 是 init；限流信息、错误消息和收尾的结果都不报，上层才分得清"刚启动"和"已经在干活"。"""
+    monkeypatch.setattr(cs_mod, "time", SteppingClock())
     s = session_with([SystemMessage("init", {"model": "claude-haiku"}),
                       RateLimitEvent(rate_limit_info=None, uuid="u", session_id="s"),
-                      assistant(TextBlock("Not logged in"), model="<synthetic>", error="authentication_failed"),
+                      assistant(TextBlock("Not logged in · Please run /login"), model="<synthetic>",
+                                error="authentication_failed"),
                       result(is_error=True)])
     evs = await collect(s)
-    assert not [e for e in evs if type(e).__name__ == "Activity"]
+    assert [e.label for e in evs if type(e).__name__ == "Activity"] == ["init"]
     assert [e.kind for e in evs if isinstance(e, Error)][0] == ErrorKind.AUTH
 
 
@@ -655,7 +671,7 @@ def test_session_recorded_as_soon_as_claude_starts(provider):
     """新会话的第一轮超时卡住时，会话也已经记下：进程被强制关闭后，下一句话还能接回来。"""
     from core.agent.agent_session import Activity
     provider.filler, provider.turn_timeout, provider.stall_timeout = "", 0.5, 5
-    FakeAgent.script = [[Activity("SystemMessage"), 3.0, Done()]]  # 开始处理后一直不结束
+    FakeAgent.script = [[Activity("init"), 3.0, Done()]]  # 实测网络卡住时只收到 init，之后一直没有动静
     c = conn()
     provider.on_conn_open(c)
     out = run(provider, c, "整理一下文件")
@@ -699,17 +715,47 @@ def test_session_not_recorded_when_first_event_is_error(provider):
     assert provider.store.get("dev-1")["session_id"] == "old-session"
 
 
-def test_expired_session_not_overwritten_when_new_session_fails(provider):
-    """旧会话已超过自动接续窗口（说"接着上次聊"仍能接回）时，新会话第一轮就鉴权出错，不能用新会话 ID 覆盖它。
-    出错后还会收到收尾的 Done，它也不算 Claude 开始处理。"""
+NOT_LOGGED_IN = [Activity("init"), Error(ErrorKind.AUTH, "Not logged in"), Error(ErrorKind.UNKNOWN, "success: ")]
+
+
+def test_expired_session_restored_when_new_session_fails(provider):
+    """旧会话已超过自动接续窗口（说"接着上次聊"仍能接回）时，新会话第一轮就因为没登录出错：
+    init 时先记下了新会话，出错后要原样恢复旧记录（包括最后活跃时间），不能被新会话覆盖。"""
     old = time.time() - 10 * 3600
     provider.store.touch("dev-1", "old-session", now=old)
-    FakeAgent.script = [[Error(ErrorKind.AUTH, "not logged in"), Done()]]
+    FakeAgent.script = [list(NOT_LOGGED_IN)]
     c = conn()
     provider.on_conn_open(c)
     run(provider, c, "你好")
     assert FakeAgent.instances[0].resume_id is None  # 确实走的是新开会话
     assert provider.store.get("dev-1") == {"session_id": "old-session", "last_active": old}
+
+
+def test_no_record_left_when_first_session_fails(provider):
+    """之前没有记录，新会话一开始就出错：不留下新会话的记录。"""
+    FakeAgent.script = [list(NOT_LOGGED_IN)]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert provider.store.get("dev-1") is None
+
+
+def test_session_kept_when_error_after_claude_started(provider):
+    """Claude 已经开始说话后才出错（例如服务端出错）：会话里已经有内容，照常记下。"""
+    FakeAgent.script = [[Activity("init"), TextDelta("🙂我先看一下。"), Error(ErrorKind.SERVER, "overloaded")]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert provider.store.get("dev-1")["session_id"] == "new-0"
+
+
+def test_session_kept_when_process_exits_after_init(provider):
+    """刚启动进程就退出：和网络卡住一样，会话里已经有用户的话，照常记下，下一句话还能接回。"""
+    FakeAgent.script = [[Activity("init"), Error(ErrorKind.PROCESS_EXITED, "killed")]]
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    assert provider.store.get("dev-1")["session_id"] == "new-0"
 
 
 def test_abort_and_close_hooks(provider):
