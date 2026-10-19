@@ -27,7 +27,7 @@ from typing import Dict, Optional
 
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
-from core.agent.agent_session import Activity, AgentSessionError, Done, Error, ErrorKind, TextDelta
+from core.agent.agent_session import STARTING_LABELS, Activity, AgentSessionError, Done, Error, ErrorKind, TextDelta
 from core.agent.claude_session import ClaudeSession, ClaudeSessionConfig
 from core.agent.session_store import SessionStore, choose_resume
 from core.agent.voice_commands import DEFAULT_RESUME_KEYWORDS, match_resume
@@ -363,7 +363,7 @@ class LLMProvider(LLMProviderBase):
                 agent, recorded, working, failed, previous = st.agent, False, False, False, None
                 async for ev in agent.send(text):
                     if isinstance(ev, Error) and not working and ev.kind != ErrorKind.PROCESS_EXITED:
-                        failed = True  # 还没开始干活就出错：没登录、额度用完等
+                        failed = True  # 还没开始干活就出错：没登录、额度用完、限流或过载重试用完等
                     elif not failed and isinstance(ev, (TextDelta, Activity)):
                         if not recorded:
                             # 会话已存在于本机（init 时用户的话就已存进去）。马上记下来：这一轮如果卡死（例如和 Anthropic 的
@@ -371,7 +371,7 @@ class LLMProvider(LLMProviderBase):
                             previous = self.store.get(st.key)
                             self.store.touch(st.key, agent.session_id)
                             recorded = True
-                        working = working or not (isinstance(ev, Activity) and ev.label == "init")
+                        working = working or not (isinstance(ev, Activity) and ev.label in STARTING_LABELS)
                     out.put(ev)
                     if isinstance(ev, Error) and ev.kind == ErrorKind.PROCESS_EXITED:
                         st.agent = None
