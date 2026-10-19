@@ -88,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # start
 - On first start, Windows Firewall asks whether Python may access the network. Allow it on private networks, or the device cannot connect.
 - Windows has no autostart yet; run `start.ps1` once after each boot.
 - To update later: run `git pull` in the project folder, then run `install.ps1` again to add any new dependencies.
-- To uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`.
+- To uninstall: first run `cd ~` to leave the project folder (Windows cannot delete a folder that is in use), then run `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1` (use the actual path if the project is not in your user folder).
 
 Once the server is running, you need two addresses:
 

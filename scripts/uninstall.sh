@@ -14,6 +14,8 @@ main() {
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   server="$root/main/xiaozhi-server"
   workspace="$HOME/xiaozhi-workspace"
+  # 运行本脚本的终端停在安装目录里时，删完后那个终端会留在一个已经不存在的目录，最后提醒一下
+  local here="$PWD"
 
   # 确认是本项目的安装目录，避免删错
   [[ -f "$server/app.py" && -f "$root/scripts/install.sh" && "$root" != "/" && "$root" != "$HOME" ]] \
@@ -65,6 +67,7 @@ main() {
     cd "$HOME"
     rm -rf "$root"
     info "已删除：$root"
+    [[ "$here/" == "$root/"* ]] && info "你的终端还停在已删除的目录里，请运行 cd ~ 离开"
   fi
 
   if [[ -d "$workspace" ]]; then

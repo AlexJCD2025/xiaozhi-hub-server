@@ -88,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # 启动
 - 第一次启动时，Windows 防火墙会询问是否允许 Python 访问网络，请勾选"专用网络"并允许，否则设备连不上。
 - Windows 目前没有开机自启，每次开机后运行一次 `start.ps1`。
 - 以后更新：在项目目录里运行 `git pull`，再运行一次 `install.ps1` 补装新增的依赖。
-- 卸载：`powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。
+- 卸载：先运行 `cd ~` 离开项目目录（Windows 删不掉正在使用的目录），再运行 `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1`（项目不在用户目录下的，换成实际路径）。
 
 服务启动后，会用到两个地址：
 

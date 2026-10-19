@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # 启动
 - 第一次启动时，Windows 防火墙会询问是否允许 Python 访问网络，请勾选"专用网络"并允许，否则设备连不上。
 - Windows 目前没有开机自启，每次开机后运行一次 `start.ps1`。
 - 更新：在项目目录里运行 `git pull`，再运行一次 `install.ps1` 补装新增的依赖。
-- 卸载：`powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。
+- 卸载：先运行 `cd ~` 离开项目目录（Windows 删不掉正在使用的目录），再运行 `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1`（项目不在用户目录下的，换成实际路径）。
 
 ## 2. 首次配置
 
@@ -208,7 +208,7 @@ bash ~/xiaozhi-hub-server/scripts/update.sh
 bash ~/xiaozhi-hub-server/scripts/uninstall.sh
 ```
 
-Windows 用 `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。卸载脚本会先列出要删的内容，回答 `y` 才执行：
+Windows：先运行 `cd ~` 离开项目目录（Windows 删不掉正在使用的目录），再运行 `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1`（项目不在用户目录下的，换成实际路径）。卸载脚本会先列出要删的内容，回答 `y` 才执行：
 
 1. 取消开机自启，停止后台服务（macOS 删掉 LaunchAgent，Linux 删掉 systemd 用户服务）；
 2. 删除整个安装目录，包括虚拟环境、语音识别模型、配置文件和里面的 API Key；
