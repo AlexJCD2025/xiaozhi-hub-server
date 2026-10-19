@@ -30,7 +30,7 @@ main() {
   printf "\n将要卸载 xiaozhi-hub-server：\n"
   info "取消开机自启，停止后台服务"
   if [[ "$dev_repo" == "1" ]]; then
-    info "（这是完整的 git 仓库，可能是开发用的，只取消开机自启，不删除目录：$root）"
+    info "（这是完整的 git 仓库，可能是开发用的，只取消开机自启，不删除目录：${root}）"
   else
     info "删除安装目录：$root"
     info "（包括虚拟环境、语音识别模型、配置文件 data/.config.yaml 和里面的 API Key）"
@@ -70,7 +70,7 @@ main() {
     [[ -n "$other_pid" && "$listener" == "$other_pid" ]] && up=0
   fi
   if [[ "$up" == "1" ]]; then
-    fail "服务还在运行（端口 $port），可能是用 start.sh 手动启动的。请在它的终端按 Ctrl+C 停止后，重新运行本脚本"
+    fail "服务还在运行（端口 ${port}），可能是用 start.sh 手动启动的。请在它的终端按 Ctrl+C 停止后，重新运行本脚本"
   fi
 
   if [[ "$dev_repo" == "1" ]]; then
@@ -89,7 +89,7 @@ main() {
       rm -rf "$workspace"
       info "已删除：$workspace"
     else
-      info "保留：$workspace（不需要的话可以手动删除）"
+      info "保留：${workspace}（不需要的话可以手动删除）"
     fi
   fi
 
