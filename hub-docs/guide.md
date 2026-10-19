@@ -27,7 +27,7 @@ xiaozhi-hub-server 是小智设备（M5Stack StackChan、ESP32 开发板等）�
 - 能访问网络；
 - 已安装 git（macOS 没有时运行 `xcode-select --install`）。
 
-**一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`，然后自动安装；安装结束时会询问是否开机自启（见 [§7](#7-开机自启与更新)）。
+**一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`，然后自动安装；安装结束时会询问是否开机自启，直接回车就是开启（见 [§7](#7-开机自启与更新)）。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
@@ -42,7 +42,7 @@ bash scripts/install.sh   # 安装
 bash scripts/start.sh     # 启动（没有开启开机自启时）
 ```
 
-安装脚本会准备好运行需要的一切，缺什么会先问你再装：Python 3.10 和依赖（装在项目自己的虚拟环境里，不影响系统的 Python）、opus 和 ffmpeg、语音识别模型，以及配置文件。电脑上装了 Claude Code 时，默认用它当大模型；没装时用智谱 glm-4-flash，需要到管理后台填 API Key。
+安装脚本会准备好运行需要的一切，缺什么会先问你再装：Python 3.10 和依赖（装在项目自己的虚拟环境里，不影响系统的 Python）、opus 和 ffmpeg、语音识别模型，以及配置文件。电脑上装了 Claude Code 时，直接用它当大模型；没装时用 Claude API，需要到管理后台填 API Key（也可以换成别的厂商）。
 
 一共下载约 370MB，装好后占用约 800MB 硬盘，运行时内存约 0.6GB。国内网络慢的话，先看 [§8 安装细节](#8-安装细节) 里的镜像设置。
 
@@ -152,7 +152,7 @@ http://<电脑的局域网 IP>:16688/xiaozhi/ota/
 
 ### 开机自启
 
-安装结束时会询问是否开机自启。开启后，服务在后台运行，不用开着终端；异常退出时 30 秒后自动重启。以后也可以随时开关：
+安装结束时会询问是否开机自启，默认开启（直接回车）；非交互安装（`ASSUME_YES=1` 或没有终端）也会开启。开启后，服务在后台运行，不用开着终端；异常退出时 30 秒后自动重启。以后也可以随时开关：
 
 ```bash
 bash scripts/autostart.sh enable    # 开启，并马上在后台启动
@@ -187,7 +187,10 @@ bash ~/xiaozhi-hub-server/scripts/update.sh
 
 ### 装了什么
 
-- uv（Python 包管理工具）、Python 3.10、opus 和 ffmpeg：电脑上已有就直接用，缺少时先询问再安装；
+- uv（Python 包管理工具）、Python 3.10、opus 和 ffmpeg：电脑上已有就直接用，缺少时先询问再安装：
+  - macOS：用 Homebrew 安装 ffmpeg 和 opus；
+  - Linux：用 apt、dnf 或 pacman 安装（需要 sudo）；
+  - Windows：ffmpeg 用 winget 安装（`Gyan.FFmpeg`）；opus 自动下载 discord.py 官方安装包里的 Windows 版 libopus 1.3.1（约 1MB，固定版本并校验哈希），放到 `main/xiaozhi-server/.venv/Scripts/opus.dll`。ARM 版 Windows 没有现成的 opus.dll，需要手动准备；
 - Python 依赖：全部装在项目自己的虚拟环境 `main/xiaozhi-server/.venv` 里；
 - 语音识别模型：X-ASR 中英混合模型（sherpa-onnx int8 版），从 Hugging Face 下载；
 - 配置文件 `main/xiaozhi-server/data/.config.yaml`：已经存在时保持不变；

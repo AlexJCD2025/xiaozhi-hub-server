@@ -8,6 +8,8 @@ $Server = Join-Path $Root "main\xiaozhi-server"
 $Py = Join-Path $Server ".venv\Scripts\python.exe"
 
 if (-not (Test-Path $Py)) { Write-Host "未找到虚拟环境，请先运行 scripts\install.ps1" -ForegroundColor Red; exit 1 }
+# 安装脚本把 opus.dll 放在虚拟环境的 Scripts 目录里，opuslib_next 在 PATH 里找它
+$env:Path = "$(Join-Path $Server '.venv\Scripts');$env:Path"
 
 if ($env:SKIP_DOCTOR -ne "1") {
     & $Py (Join-Path $Root "scripts\doctor.py")

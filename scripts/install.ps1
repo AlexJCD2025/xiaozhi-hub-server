@@ -67,7 +67,9 @@ if (Has "ffmpeg") { Info "ffmpeg 已安装" }
 elseif (Has "winget") {
     if (Ask "未找到 ffmpeg，是否用 winget 安装（Gyan.FFmpeg）？" "Y") {
         winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
-        Info "安装后可能需要重新打开 PowerShell，ffmpeg 才会出现在 PATH 中"
+        # winget 把 ffmpeg 加进了系统和用户的 PATH，但当前窗口的 PATH 还是旧的，重新读一次
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User") + ";" + $env:Path
+        if (Has "ffmpeg") { Info "ffmpeg 已安装" } else { Info "ffmpeg 装好了但当前窗口还找不到，请关掉 PowerShell 重新打开后再运行本脚本" }
     } else { Fail "请手动安装 ffmpeg 并加入 PATH 后重新运行本脚本" }
 } else { Fail "未找到 ffmpeg 和 winget，请手动安装 ffmpeg 并加入 PATH：https://www.gyan.dev/ffmpeg/builds/" }
 
@@ -84,13 +86,39 @@ if ($LASTEXITCODE -ne 0) { Fail "Python 依赖安装失败" }
 
 # ---------- 5. opus ----------
 Step "检查 opus"
+# opuslib_next 在 PATH 里找 opus.dll。我们把它放在虚拟环境的 Scripts 目录里，安装和启动（start.ps1）时都把这个目录加进 PATH
+$VenvScripts = Join-Path $Venv "Scripts"
+$env:Path = "$VenvScripts;$env:Path"
+function Show-OpusHelp {
+    Info "请手动准备 opus.dll，任选一种："
+    Info "  1) 安装 Anaconda/Miniconda 后执行：conda install -c conda-forge libopus，再把 opus.dll 复制到 $VenvScripts"
+    Info "  2) 下载 Windows 版 opus.dll，放到 $VenvScripts"
+    Info "处理后重新运行本脚本，或直接运行 scripts\start.ps1 查看自检结果"
+}
 Quiet { & $Py -c "import opuslib_next" }
 if ($LASTEXITCODE -eq 0) { Info "opus 可用" }
 else {
-    Info "未找到 opus.dll。可选的处理方式："
-    Info "  1) 安装 Anaconda/Miniconda 后执行：conda install -c conda-forge libopus，并把 Library\bin 加入 PATH"
-    Info "  2) 下载 Windows 版 opus.dll，放到 $Server 目录或任意 PATH 目录中"
-    Info "处理后重新运行本脚本，或直接运行 scripts\start.ps1 查看自检结果"
+    # discord.py 的官方安装包里带了 Windows 版 libopus 1.3.1（64 位和 32 位，BSD 许可）。按哈希固定版本下载，只取出 DLL
+    $arch = (& $Py -c "import platform; print(platform.machine())" | Out-String).Trim()
+    $target = @{ "AMD64" = "x64"; "x86" = "x86" }[$arch]
+    if (-not $target) { Info "未找到 opus.dll，当前 Python 是 $arch 版本，没有现成的 opus.dll 可用。"; Show-OpusHelp }
+    elseif (Ask "未找到 opus.dll，是否自动下载一份（取自 discord.py 官方安装包，约 1MB，会校验文件哈希）？" "Y") {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("xiaozhi-opus-" + [guid]::NewGuid())
+        $req = "$tmp.txt"
+        Set-Content -Path $req -Value "discord.py==2.7.1 --hash=sha256:849dca2c63b171146f3a7f3f8acc04248098e9e6203412ce3cf2745f284f7439" -Encoding ASCII
+        $old = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+        uv pip install --python $Py --no-deps --require-hashes --target $tmp -r $req
+        $ErrorActionPreference = $old
+        $dll = Join-Path $tmp "discord\bin\libopus-0.$target.dll"
+        if (Test-Path $dll) {
+            Copy-Item $dll (Join-Path $VenvScripts "opus.dll") -Force
+            Copy-Item (Join-Path $tmp "discord\bin\COPYING") (Join-Path $VenvScripts "opus-COPYING.txt") -Force
+        }
+        Remove-Item -Recurse -Force $tmp, $req -ErrorAction SilentlyContinue
+        Quiet { & $Py -c "import opuslib_next" }
+        if ($LASTEXITCODE -eq 0) { Info "opus 可用（$VenvScripts\opus.dll）" }
+        else { Info "opus.dll 自动下载失败。如果是网络问题，可以设置 `$env:UV_INDEX_URL 使用国内镜像后重新运行。"; Show-OpusHelp }
+    } else { Show-OpusHelp }
 }
 
 # ---------- 6. 语音识别模型 ----------
@@ -105,15 +133,16 @@ Download "$XasrUrl/bpe.model" (Join-Path $XasrDir "bpe.model") 100000
 Step "生成配置文件"
 $claude = Get-Command claude.exe -ErrorAction SilentlyContinue
 if (-not $claude) { $claude = Get-Command claude -ErrorAction SilentlyContinue }
+if (-not $claude) { $claude = Get-Command (Join-Path $env:USERPROFILE ".local\bin\claude.exe") -ErrorAction SilentlyContinue }
 if (Test-Path $Config) { Info "已存在，保持不变：$Config" }
 else {
     New-Item -ItemType Directory -Force -Path (Split-Path $Config) | Out-Null
     $text = Get-Content (Join-Path $Root "scripts\config.template.yaml") -Raw -Encoding UTF8
-    if ($claude -and (Ask "检测到 Claude Code，默认使用它作为大模型？" "Y")) { Info "大模型：ClaudeCLI（本机 Claude Code）" }
+    # 本机装了 Claude Code 就直接用它；没装时用管理后台厂商列表里的第一个：Claude API，需要填 API Key
+    if ($claude) { Info "大模型：本机 Claude Code" }
     else {
-        $text = $text -replace "(\n  LLM: )ClaudeCLI[^\n]*", '${1}ChatGLMLLM        # 在管理后台填写 API Key'
-        $text = $text -replace "(\n  Intent: )nointent[^\n]*", '${1}function_call'
-        Info "大模型：ChatGLMLLM（智谱 glm-4-flash，需要在管理后台填写 API Key）"
+        $text = $text -replace "(\n  LLM: )ClaudeCLI[^\r\n]*", '${1}ClaudeAPI          # 在管理后台填写 API Key'
+        Info "大模型：Claude API（没找到本机的 Claude Code）。请在管理后台填写 Claude API Key，或者换成别的厂商"
     }
     [System.IO.File]::WriteAllText($Config, $text, (New-Object System.Text.UTF8Encoding $false))
     Info "已生成：$Config"
@@ -151,12 +180,21 @@ foreach ($f in @((Join-Path $Server "config.yaml"), $Config)) {
     if ($t -match "(?m)^server:[\s\S]*?^\s+port:\s*(\d+)") { $WsPort = $Matches[1] }
 }
 
+# 用的是 API 模型、还没填 Key 时，提醒去后台填
+Push-Location $Server
+# Python 只输出模型名（ASCII），中文提示在这里拼，避免控制台编码不同导致乱码
+$NoKey = Quiet { & $Py -c "from core.admin import config_store as c; m = c.load_merged(); n = m['selected_module']['LLM']; e = m['LLM'][n]; print(n if c.entry_type(m, 'LLM') != 'claude_cli' and any(c.is_placeholder(e.get(k)) for k in e if c.SECRET_FIELD.search(k)) else '')" }
+Pop-Location
+$NoKey = ($NoKey | Out-String).Trim()
+$LlmHint = if ($NoKey) { "  大模型 $NoKey 还没填 API Key：打开管理后台的“大模型”页填写后才能对话。" } else { "" }
+
 Write-Host @"
 
 安装完成。
 
   启动服务：  powershell -ExecutionPolicy Bypass -File scripts\start.ps1
   首次打开管理后台需要在本机浏览器访问 http://127.0.0.1:$HttpPort/admin 设置密码。
+$LlmHint
 
 提醒：
   - 请在路由器里给这台电脑设置固定 IP，否则 IP 变了设备会连不上。

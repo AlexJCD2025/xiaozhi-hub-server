@@ -51,7 +51,7 @@
 - 电脑和设备连在同一个局域网；
 - 使用 Claude Code 的话，先安装好，并在终端运行一次 `claude` 登录。
 
-在终端运行这一行。代码会装到 `~/xiaozhi-hub-server`，安装结束时会询问是否开机自启：
+在终端运行这一行。代码会装到 `~/xiaozhi-hub-server`，安装结束时会询问是否开机自启（直接回车就是开启）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/justhalfbit/xiaozhi-hub-server/main/scripts/bootstrap.sh | bash
