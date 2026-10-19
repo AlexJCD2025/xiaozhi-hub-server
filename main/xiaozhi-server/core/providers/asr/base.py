@@ -18,6 +18,7 @@ from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
 from core.utils.util import remove_punctuation_and_length
 from core.handle.receiveAudioHandle import handleAudioMessage
+from core.agent.asr_text import correct_and_record  # [xiaozhi-hub]
 from typing import Optional, Tuple, List, NamedTuple, TYPE_CHECKING
 
 
@@ -118,6 +119,8 @@ class ASRProviderBase(ABC):
                 raw_text = ""
             else:
                 raw_text, _ = asr_result
+            # [xiaozhi-hub] 识别后纠错替换（如 cloud code → Claude Code），并记一条最近识别记录供管理后台查看
+            raw_text = correct_and_record(conn, raw_text)
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")

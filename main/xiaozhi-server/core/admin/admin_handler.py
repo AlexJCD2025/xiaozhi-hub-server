@@ -69,6 +69,8 @@ class AdminHandler:
                 web.get("/admin/api/pipeline", self.handle_pipeline),
                 web.get("/admin/api/asr", self.handle_asr),
                 web.post("/admin/api/vad", self.handle_vad_save),
+                web.post("/admin/api/asr/hotwords", self.handle_hotwords_save),
+                web.post("/admin/api/asr/corrections", self.handle_corrections_save),
                 web.get("/admin/api/tts", self.handle_tts),
                 web.post("/admin/api/tts", self.handle_tts_save),
                 web.get("/admin/api/tts/preview", self.handle_tts_preview),
@@ -293,16 +295,26 @@ class AdminHandler:
             changed = await self._blocking(pages.save_call_names, body, merged, self.config_path)
         except ValueError as e:
             return self._error(str(e), 400)
+        note = "已保存，马上生效" if changed else "没有修改"
         if changed:
-            # 设置马上生效：服务的配置和每个在线连接各自的配置副本都要更新
-            new_cfg = (await self._blocking(self._merged)).get("call_names") or {}
-            self.config["call_names"] = copy.deepcopy(new_cfg)
-            for item in connections.snapshot():
-                conn = connections.get(item["session_id"])
-                if conn is not None:
-                    conn.config["call_names"] = copy.deepcopy(new_cfg)
+            new_merged = await self._blocking(self._merged)
+            self._push_config("call_names", new_merged.get("call_names") or {})
             self.logger.bind(tag=TAG).info(f"管理后台更新了呼名设置: {', '.join(changed)}")
-        return self._json({"ok": True, "changed": changed, "note": "已保存，马上生效" if changed else "没有修改"})
+            # 呼名里模型的名字会自动并入热词，称呼变了要重新加载语音识别
+            if pages.describe_hotwords(new_merged)["supported"] and self._running("ASR") == \
+                    (new_merged.get("selected_module") or {}).get("ASR"):
+                result = await self._apply("ASR")
+                if result.get("failed"):
+                    note += f"；热词重新加载失败：{result['error']}"
+        return self._json({"ok": True, "changed": changed, "note": note})
+
+    def _push_config(self, key: str, value) -> None:
+        """设置马上生效：服务的配置和每个在线连接各自的配置副本都要更新。"""
+        self.config[key] = copy.deepcopy(value)
+        for item in connections.snapshot():
+            conn = connections.get(item["session_id"])
+            if conn is not None:
+                conn.config[key] = copy.deepcopy(value)
 
     async def handle_call_names_learn(self, request: web.Request):
         self._require_login(request)
@@ -463,6 +475,38 @@ class AdminHandler:
         merged = await self._blocking(self._merged)
         return self._json({"ok": True, **await self._blocking(pages.describe_asr, merged),
                            "running": self._running("ASR")})
+
+    async def handle_hotwords_save(self, request: web.Request):
+        """保存热词后重新加载语音识别（X-ASR 约 1 秒）：新连接马上用上，在线设备重连后生效。"""
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(pages.save_hotwords, body.get("words"), merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        if not changed:
+            return self._json({"ok": True, "changed": [], "note": "没有修改"})
+        self.logger.bind(tag=TAG).info("管理后台更新了热词")
+        name = merged["selected_module"]["ASR"]
+        result = await self._apply_if_selected("ASR", name, changed)
+        if result.get("failed"):
+            return self._json({"ok": True, "changed": changed, **result})
+        note = "已保存并重新加载语音识别；新连接马上生效，在线设备重新连接后生效" if result.get("applied") else result["note"]
+        return self._json({"ok": True, "changed": changed, "applied": result.get("applied"), "note": note})
+
+    async def handle_corrections_save(self, request: web.Request):
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(pages.save_corrections, body.get("items"), merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        if changed:
+            self._push_config("asr_corrections", (await self._blocking(self._merged)).get("asr_corrections") or {})
+            self.logger.bind(tag=TAG).info("管理后台更新了识别纠错表")
+        return self._json({"ok": True, "changed": changed, "note": "已保存，马上生效" if changed else "没有修改"})
 
     async def handle_vad_save(self, request: web.Request):
         """保存说完停顿时长。VAD 实例是所有连接共用的，直接改它的阈值，在线设备的下一句话就用上。"""

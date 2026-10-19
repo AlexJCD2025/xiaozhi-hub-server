@@ -797,14 +797,169 @@ async function renderASR(root) {
       </div>
     </div>
     ${vadCard(d.vad)}
+    ${hotwordsCard(d.hotwords)}
+    <div class="card" style="margin-top:16px" id="cor-card"></div>
+    ${recentCard(d.recent)}
     <p class="muted small" style="margin-top:14px">其他语音识别方案暂不支持在后台设置。</p>`;
-  const v = d.vad;
-  if (!v.supported) return;
-  const input = root.querySelector("#vad-silence");
-  page.dirty = () => input.value.trim() !== String(v.silence_ms);
-  $("vad-save").onclick = (e) => busy(e.target, async () => {
-    try { const r = await api("vad", { silence_ms: input.value.trim() }); toast(r.note); page.dirty = null; await openPage("asr", true); }
-    catch (err) { toast(err.message, true); }
+  const checks = [bindVad(d.vad), bindHotwords(d.hotwords), bindCorrections(d.corrections)];
+  page.dirty = () => checks.some((f) => f && f());
+  bindRecent(root);
+}
+
+// 保存一张卡片后重新打开本页，显示服务端整理后的结果（各卡片分别保存）
+const saveAndReload = (target, path, body) => busy(target, async () => {
+  try { const r = await api(path, body); toast(r.note, r.failed); page.dirty = null; await openPage("asr", true); }
+  catch (err) { toast(err.message, true); }
+});
+
+function bindVad(v) {
+  if (!v.supported) return null;
+  const input = $("vad-silence");
+  $("vad-save").onclick = (e) => saveAndReload(e.target, "vad", { silence_ms: input.value.trim() });
+  return () => input.value.trim() !== String(v.silence_ms);
+}
+
+// ---------- 热词 ----------
+
+function hotwordsCard(h) {
+  return `
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h2>热词</h2><span class="pill">${h.words.length + h.auto.length} 个</span></div>
+      <div class="panel ${h.supported ? "" : "disabled-area"}">
+        <p style="margin:0">容易认错的专有名词，识别时优先考虑，比如 GitHub、StackChan。只能把发音接近的词救回来；发音完全一样的（Claude 总被听成 cloud），用下面的“识别后纠错”。
+          写原本的大小写，一个词一项，不要太多（几十个以内），太多反而容易误认。</p>
+        <div class="chips" id="hw-chips"></div>
+        ${h.auto.length ? `<p class="muted small" style="margin:10px 0 0">虚线的来自<a href="#calls">呼名</a>里的模型名字，自动带上，在呼名页修改。</p>` : ""}
+        <div style="display:flex;gap:8px;margin-top:12px;max-width:440px">
+          <input class="in" id="hw-new" placeholder="添加热词，回车确认" ${h.supported ? "" : "disabled"}><button class="btn sm" id="hw-add" ${h.supported ? "" : "disabled"}>添加</button></div>
+        <div class="actions"><span class="result muted">${h.supported ? "保存后重新加载语音识别（约 1 秒）：新连接马上生效，在线设备重新连接后生效。" : "当前语音识别不支持热词，支持的有 X-ASR、Fun-ASR-Nano、Qwen3-ASR。"}</span>
+          <button class="btn primary" id="hw-save" ${h.supported ? "" : "disabled"}>保存热词</button></div>
+      </div>
+    </div>`;
+}
+
+function bindHotwords(h) {
+  if (!h.supported) return null;
+  const words = [...h.words];
+  const draw = () => {
+    $("hw-chips").innerHTML = words.map((w, i) => `<span class="chip on">${esc(w)}
+        <button class="chip-x" data-del="${i}" title="删除" aria-label="删除 ${esc(w)}">×</button></span>`).join("")
+      + h.auto.map((w) => `<span class="chip risky" title="来自呼名">${esc(w)}</span>`).join("")
+      || '<span class="muted small">还没有热词</span>';
+    $("hw-chips").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { words.splice(+b.dataset.del, 1); draw(); }));
+  };
+  const add = () => {
+    const input = $("hw-new"), w = input.value.replace(/\s+/g, " ").trim();
+    if (!w) return;
+    if (/[,，]/.test(w)) { toast("一个词一项，不要用逗号", true); return; }
+    if (![...words, ...h.auto].some((x) => x.toLowerCase() === w.toLowerCase())) words.push(w);
+    input.value = ""; draw();
+  };
+  $("hw-add").onclick = add;
+  $("hw-new").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  $("hw-save").onclick = (e) => saveAndReload(e.target, "asr/hotwords", { words });
+  draw();
+  return () => JSON.stringify(words) !== JSON.stringify(h.words) || !!$("hw-new").value.trim();
+}
+
+// ---------- 识别后纠错 ----------
+
+function bindCorrections(list) {
+  const items = list.map((x) => ({ target: x.target, aliases: [...x.aliases] }));
+  const original = JSON.stringify(items);
+  const card = $("cor-card");
+  const draw = () => {
+    card.innerHTML = `
+      <div class="card-head"><h2>识别后纠错</h2><span class="pill">${items.length} 条</span></div>
+      <div class="panel">
+        <p style="margin:0">识别出文字后，把认错的写法换成正确的，再交给大模型和设备显示。不区分大小写，中英文之间有没有空格都算；英文按整词替换，“cloud code” 不会改到 “cloud coder” 里。
+          认错的写法至少 2 个字，太短容易误改普通的话。</p>
+        ${items.map((it, i) => `
+          <div class="cor-row" data-row="${i}" style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span class="muted small">改成</span><input class="in" data-target value="${esc(it.target)}" style="max-width:220px">
+              <button class="btn sm" data-del-row title="删除这一条">删除</button></div>
+            <div class="chips">${it.aliases.map((a, j) => `<span class="chip on">${esc(a)}
+              <button class="chip-x" data-del="${j}" title="删除" aria-label="删除 ${esc(a)}">×</button></span>`).join("")}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;max-width:440px">
+              <input class="in" data-new placeholder="再加一种认错的写法"><button class="btn sm" data-add>添加</button></div>
+          </div>`).join("")}
+        <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
+          <div class="section-title" style="margin-top:0">新增一条</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input class="in" id="cor-alias" placeholder="认错的写法，如 cloud code" style="max-width:240px">
+            <span class="muted small">改成</span>
+            <input class="in" id="cor-target" placeholder="正确写法，如 Claude Code" style="max-width:240px">
+            <button class="btn sm" id="cor-add">添加</button></div>
+        </div>
+        <div class="actions"><span class="result muted">保存后马上生效，在线设备不用重新连接。</span>
+          <button class="btn primary" id="cor-save">保存纠错表</button></div>
+      </div>`;
+    card.querySelectorAll("[data-row]").forEach((row) => {
+      const it = items[+row.dataset.row];
+      row.querySelector("[data-target]").oninput = (e) => { it.target = e.target.value; };
+      row.querySelector("[data-del-row]").onclick = () => { items.splice(+row.dataset.row, 1); draw(); };
+      row.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { it.aliases.splice(+b.dataset.del, 1); draw(); }));
+      const input = row.querySelector("[data-new]");
+      const add = () => { const a = input.value.trim(); if (a && !it.aliases.some((x) => x.toLowerCase() === a.toLowerCase())) it.aliases.push(a); draw(); };
+      row.querySelector("[data-add]").onclick = add;
+      input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+    });
+    $("cor-add").onclick = () => {
+      const alias = $("cor-alias").value.trim(), target = $("cor-target").value.trim();
+      if (!alias || !target) { toast("认错的写法和正确写法都要填", true); return; }
+      const same = items.find((x) => x.target.toLowerCase() === target.toLowerCase());
+      if (same) { if (!same.aliases.some((x) => x.toLowerCase() === alias.toLowerCase())) same.aliases.push(alias); }
+      else items.push({ target, aliases: [alias] });
+      draw();
+    };
+    $("cor-save").onclick = (e) => saveAndReload(e.target, "asr/corrections", { items });
+  };
+  draw();
+  return () => JSON.stringify(items) !== original || !!($("cor-alias").value.trim() || $("cor-target").value.trim());
+}
+
+// ---------- 最近识别 ----------
+
+function recentCard(list) {
+  const time = (t) => new Date(t * 1000).toLocaleTimeString("zh-CN", { hour12: false });
+  return `
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h2>最近识别</h2><span><span class="pill">${list.length} 句</span>
+        <button class="btn sm" id="recent-refresh" style="margin-left:6px">刷新</button></span></div>
+      <div class="panel">
+        <p class="muted small" style="margin:0">最近 30 句识别结果，只保存在内存里，重启服务后清空。看到认错的词，先用鼠标选中那几个字，再点“加热词”或“加纠错”；不选就带上整句（加纠错时带纠错前的原文），再自己删改。</p>
+        ${list.length ? list.map((x, i) => `
+          <div data-recent="${i}" data-raw="${esc(x.raw)}" style="display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
+            <span class="muted small" style="flex:none;width:64px">${esc(time(x.time))}</span>
+            <div style="flex:1;min-width:0"><div data-text>${esc(x.text)}</div>
+              ${x.raw !== x.text ? `<div class="muted small">纠错前：${esc(x.raw)}</div>` : ""}</div>
+            <span style="flex:none;display:flex;gap:6px"><button class="btn sm" data-to="hw">加热词</button><button class="btn sm" data-to="cor">加纠错</button></span>
+          </div>`).join("") : '<p class="muted small" style="margin:12px 0 0">还没有识别记录。跟设备说几句话后刷新本页。</p>'}
+      </div>
+    </div>`;
+}
+
+function bindRecent(root) {
+  $("recent-refresh").onclick = () => { if (confirmLeave()) openPage("asr", true); };
+  root.querySelectorAll("[data-recent]").forEach((row) => {
+    row.querySelectorAll("[data-to]").forEach((b) => {
+      // 先记下选中的文字：点按钮时浏览器会清掉选区
+      b.onmousedown = () => {
+        const sel = window.getSelection();
+        b.dataset.picked = sel && row.contains(sel.anchorNode) ? sel.toString().trim() : "";
+      };
+      b.onclick = () => {
+        const whole = b.dataset.to === "cor" ? row.dataset.raw : row.querySelector("[data-text]").textContent.trim();
+        const text = b.dataset.picked || whole;
+        const input = $(b.dataset.to === "hw" ? "hw-new" : "cor-alias");
+        if (!input || input.disabled) { toast("当前语音识别不支持热词", true); return; }
+        input.value = text;
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+        input.focus();
+        toast(b.dataset.to === "hw" ? "改成要加的词，再点“添加”" : "改成认错的那部分，填上正确写法，再点“添加”");
+      };
+    });
   });
 }
 

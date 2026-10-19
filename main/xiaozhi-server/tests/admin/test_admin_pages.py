@@ -472,3 +472,71 @@ def test_default_xasr_entry_and_label(tmp_path):
     assert pages.asr_label(entry) == "本地识别 · X-ASR 中英混合（sherpa-onnx），不需要联网"
     tmpl = (Path(__file__).resolve().parents[4] / "scripts" / "config.template.yaml").read_text(encoding="utf-8")
     assert "ASR: SherpaXASR" in tmpl
+
+
+XASR_YAML = CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: SherpaXASR\n")
+
+
+def test_save_hotwords(cfg_path):
+    cfg_path.write_text(XASR_YAML, encoding="utf-8")
+    h = pages.describe_asr(merged(cfg_path))["hotwords"]
+    assert h["supported"] and "StackChan" in h["words"] and "Claude" not in h["auto"]  # Claude 已在默认热词里
+    with pytest.raises(ValueError, match="逗号"):
+        pages.save_hotwords(["a,b"], merged(cfg_path), cfg_path)
+    assert pages.save_hotwords(["GitHub", " Stack  Chan ", "github", ""], merged(cfg_path), cfg_path) == ["hotwords"]
+    assert merged(cfg_path)["ASR"]["SherpaXASR"]["hotwords"] == ["GitHub", "Stack Chan"]  # 整个覆盖、去重
+    assert pages.save_hotwords(["GitHub", "Stack Chan"], merged(cfg_path), cfg_path) == []
+    # SenseVoice 不支持热词
+    cfg_path.write_text(CUSTOM_YAML.replace("selected_module:\n", "selected_module:\n  ASR: SherpaASR\n"), encoding="utf-8")
+    assert pages.describe_hotwords(merged(cfg_path))["supported"] is False
+    with pytest.raises(ValueError, match="不支持热词"):
+        pages.save_hotwords(["x"], merged(cfg_path), cfg_path)
+
+
+def test_save_corrections(cfg_path):
+    d = pages.describe_corrections(merged(cfg_path))
+    assert d[0]["target"] == "Claude Code" and "cloud code" in d[0]["aliases"]
+    for bad, msg in [([{"target": "", "aliases": ["xx"]}], "正确写法"), ([{"target": "A", "aliases": ["x"]}], "2～40"),
+                     ([{"target": "A", "aliases": ["xy"]}, {"target": "B", "aliases": ["XY"]}], "只能保留一个"),
+                     ([{"target": "A", "aliases": ["a"]}], "2～40"), ([{"target": "Abc", "aliases": ["abc"]}], "还没有")]:
+        with pytest.raises(ValueError, match=msg):
+            pages.save_corrections(bad, merged(cfg_path), cfg_path)
+    items = [{"target": "Claude Code", "aliases": ["cloud code", "克拉德扣的"]}, {"target": "GitHub", "aliases": ["get hub"]}]
+    assert pages.save_corrections(items, merged(cfg_path), cfg_path) == ["asr_corrections"]
+    assert merged(cfg_path)["asr_corrections"] == {"Claude Code": ["cloud code", "克拉德扣的"], "GitHub": ["get hub"]}
+    assert pages.save_corrections(items, merged(cfg_path), cfg_path) == []
+    assert pages.save_corrections([], merged(cfg_path), cfg_path) == ["asr_corrections"]  # 清空
+    assert merged(cfg_path)["asr_corrections"] == {}
+
+
+async def test_hotwords_and_corrections_endpoints(cfg_path, monkeypatch):
+    cfg_path.write_text(XASR_YAML, encoding="utf-8")
+    loaded = []
+
+    def fake_init(logger, config, **kwargs):
+        loaded.append(config["ASR"]["SherpaXASR"]["hotwords"])
+        return {"asr": "new-asr"}
+    monkeypatch.setattr(ah, "initialize_modules", fake_init)
+    ws = SimpleNamespace(config_lock=asyncio.Lock(), _asr="old-asr")
+    running = {"selected_module": {"ASR": "SherpaXASR"}, "ASR": {}}
+    app = web.Application()
+    handler = ah.AdminHandler(running, ws_server=ws, config_path=cfg_path)
+    handler.register(app)
+    fake = SimpleNamespace(session_id="s-9", device_id="dev-9", client_ip="x", config={})
+    connections.register(fake)
+    try:
+        async with TestClient(TestServer(app)) as c:
+            await c.post("/admin/api/setup", json={"password": "pass-1234"})
+            r = await (await c.post("/admin/api/asr/hotwords", json={"words": ["GitHub", "Sonnet"]})).json()
+            assert r["applied"] and "重新加载" in r["note"] and ws._asr == "new-asr" and loaded == [["GitHub", "Sonnet"]]
+            assert (await c.post("/admin/api/asr/hotwords", json={"words": ["a,b"]})).status == 400
+            r = await (await c.post("/admin/api/asr/corrections",
+                                    json={"items": [{"target": "GitHub", "aliases": ["get hub"]}]})).json()
+            assert r["note"] == "已保存，马上生效"
+            assert fake.config["asr_corrections"] == {"GitHub": ["get hub"]} == running["asr_corrections"]
+            d = await (await c.get("/admin/api/asr")).json()
+            assert d["corrections"] == [{"target": "GitHub", "aliases": ["get hub"]}] and isinstance(d["recent"], list)
+            await c.post("/admin/api/logout", json={})
+            assert (await c.post("/admin/api/asr/corrections", json={"items": []})).status == 401
+    finally:
+        connections.unregister(fake)

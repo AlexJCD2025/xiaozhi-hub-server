@@ -122,9 +122,15 @@ def initialize_asr(config):
         if "type" not in config["ASR"][select_asr_module]
         else config["ASR"][select_asr_module]["type"]
     )
+    asr_config = config["ASR"][select_asr_module]
+    # [xiaozhi-hub] 支持热词的条目：把呼名里模型的正确名字（如 Claude、DeepSeek）也并入热词
+    if "hotwords" in asr_config:
+        from core.agent.asr_text import effective_hotwords
+
+        asr_config = {**asr_config, "hotwords": effective_hotwords(asr_config, config)}
     new_asr = asr.create_instance(
         asr_type,
-        config["ASR"][select_asr_module],
+        asr_config,
         str(config.get("delete_audio", True)).lower() in ("true", "1", "yes"),
     )
     logger.bind(tag=TAG).info("ASR模块初始化完成")
