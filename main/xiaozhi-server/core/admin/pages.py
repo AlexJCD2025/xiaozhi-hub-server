@@ -296,7 +296,48 @@ def describe_asr(merged: dict) -> dict:
         "label": ASR_LABELS.get(entry.get("type"), "云端或其他识别服务"),
         "info": info,
         "model": asr_model_check(entry),
+        "vad": describe_vad(merged),
     }
+
+
+# ---------- 说完停顿时长（VAD） ----------
+# 服务端 VAD 安静超过这么久就判定一句话说完，交给语音识别。
+# 流式识别（type 以 _stream 结尾）由识别服务自己断句，这个设置对它不起作用。
+VAD_SILENCE_FIELD = "min_silence_duration_ms"
+VAD_SILENCE_RANGE = (200, 5000)
+
+
+def describe_vad(merged: dict) -> dict:
+    name = _selected(merged, "VAD")
+    entry = _entry(merged, "VAD", name)
+    asr = _entry(merged, "ASR", _selected(merged, "ASR"))
+    return {
+        "selected": name,
+        "supported": entry.get("type") == "silero",
+        "silence_ms": int(entry.get(VAD_SILENCE_FIELD) or 1000),
+        "range": list(VAD_SILENCE_RANGE),
+        "asr_stream": str(asr.get("type") or "").endswith("_stream"),
+    }
+
+
+def save_vad_silence(raw, merged: dict, path: Path = None):
+    """校验后写入当前 VAD 条目的停顿时长，返回写入的毫秒数；和原来一样时返回 None。"""
+    name = _selected(merged, "VAD")
+    entry = _entry(merged, "VAD", name)
+    if entry.get("type") != "silero":
+        raise ValueError("当前语音检测不是 SileroVAD，后台只支持设置 SileroVAD 的停顿时长")
+    low, high = VAD_SILENCE_RANGE
+    try:
+        value = int(str(raw).strip())
+        if not low <= value <= high:
+            raise ValueError
+    except ValueError:
+        raise ValueError(f"停顿时长需要是 {low}～{high} 之间的整数（毫秒）")
+    if value == entry.get(VAD_SILENCE_FIELD):
+        return None
+    with config_store.edit_custom(path) as data:
+        data.setdefault("VAD", CommentedMap()).setdefault(name, CommentedMap())[VAD_SILENCE_FIELD] = value
+    return value
 
 
 # ---------- 语音合成 ----------
