@@ -37,7 +37,7 @@ wait_ready() {
     sleep 2
   done
   printf "\033[31m✗ 服务 90 秒内没有启动成功。\033[0m 最近的报错：\n" >&2
-  if [[ "$P" == mac ]]; then tail -n 15 "$ERR_LOG" 2>/dev/null >&2 || true
+  if [[ "$P" == mac ]]; then tail -n 15 "$ERR_LOG" >&2 2>/dev/null || true
   else journalctl --user -u "$UNIT" -n 15 --no-pager >&2 2>/dev/null || true; fi
   info "完整日志：$SERVER/tmp/server.log" >&2
   return 1
