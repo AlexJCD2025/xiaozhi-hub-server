@@ -95,13 +95,29 @@ mac_enable() {
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  mac_bootout
   launchctl enable "gui/$(id -u)/$LABEL"
+  # 刚移除的同名服务偶尔还没完全清掉，注册会报 "Bootstrap failed: 5"，稍等重试
+  local i
+  for ((i = 0; i < 5; i++)); do
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && return 0
+    sleep 1
+  done
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
 }
 
-mac_disable() {
+# 移除服务并等它真正消失（launchd 是异步移除的，马上再注册同名服务会失败）
+mac_bootout() {
+  local i
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  for ((i = 0; i < 20; i++)); do
+    launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+}
+
+mac_disable() {
+  mac_bootout
   rm -f "$PLIST"
 }
 
