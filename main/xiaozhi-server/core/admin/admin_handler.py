@@ -300,8 +300,9 @@ class AdminHandler:
             new_merged = await self._blocking(self._merged)
             self._push_config("call_names", new_merged.get("call_names") or {})
             self.logger.bind(tag=TAG).info(f"管理后台更新了呼名设置: {', '.join(changed)}")
-            # 呼名里模型的名字会自动并入热词，称呼变了要重新加载语音识别
-            if pages.describe_hotwords(new_merged)["supported"] and self._running("ASR") == \
+            # 呼名里模型的名字会自动并入热词，模型或开关变了要重新加载语音识别（只改回复语不用）
+            if {"models", "enabled"} & set(changed) and pages.describe_hotwords(new_merged)["supported"] \
+                    and self._running("ASR") == \
                     (new_merged.get("selected_module") or {}).get("ASR"):
                 result = await self._apply("ASR")
                 if result.get("failed"):

@@ -89,7 +89,8 @@ def call_name_hotwords(config: dict) -> list:
             words.append("Claude")
         elif entry in catalog.VENDOR_BY_ENTRY:
             words.append(re.sub(r"\s*GLM$", "", catalog.VENDOR_BY_ENTRY[entry]["label"]) or entry)
-    return [w for w in words if w != "自定义"]
+    # 本机 Claude Code 和 Claude API 都配了称呼时都是 "Claude"，去重
+    return list(dict.fromkeys(w for w in words if w != "自定义"))
 
 
 def effective_hotwords(asr_entry: dict, config: dict) -> list:
