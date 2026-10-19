@@ -54,3 +54,18 @@ def test_effective_hotwords_merge_dedupe():
     assert asr_text.effective_hotwords(entry, {}) == ["claude", "GitHub"]  # Claude 已有（不分大小写）
     assert asr_text.effective_hotwords({"hotwords": []}, {}) == ["Claude"]
     assert asr_text.effective_hotwords({}, {}) == []  # 条目不支持热词
+
+
+def test_corrections_target_with_backslash():
+    """正确写法里的反斜杠按原样替换，不能当成正则的转义或分组引用（之前会报错，整句话被丢掉）。"""
+    table = {"C:\\Users": ["c 盘用户"], "a\\1b": ["xx"]}
+    assert asr_text.apply_corrections("打开 c 盘用户", table) == "打开 C:\\Users"
+    assert asr_text.apply_corrections("xx", table) == "a\\1b"
+
+
+def test_correct_and_record_never_breaks_recognition(monkeypatch):
+    def boom(*a):
+        raise RuntimeError("bad table")
+    monkeypatch.setattr(asr_text, "apply_corrections", boom)
+    conn = SimpleNamespace(config={}, device_id="dev-2")
+    assert asr_text.correct_and_record(conn, "原样返回") == "原样返回"
