@@ -223,11 +223,11 @@ case "${1:-}" in
     if ! "${P}_enabled"; then echo "未开启开机自启"; exit 1; fi
     pid="$("${P}_pid" || true)"
     if ! mine; then
-      if [[ -n "$pid" ]]; then echo "开机自启指向另一份安装（$("${P}_owner")），它的服务正在运行（进程 $pid）"
+      if [[ -n "$pid" ]]; then echo "开机自启指向另一份安装（$("${P}_owner")），它的服务正在运行（进程 ${pid}）"
       else echo "开机自启指向另一份安装（$("${P}_owner")），它的服务没有在运行"; fi
       exit 3
     fi
-    if [[ -n "$pid" ]]; then echo "已开启开机自启，服务正在运行（进程 $pid）"
+    if [[ -n "$pid" ]]; then echo "已开启开机自启，服务正在运行（进程 ${pid}）"
     else echo "已开启开机自启，但服务没有在运行。启动失败的原因见 $ERR_LOG 和 $SERVER/tmp/server.log"; fi
     ;;
   *)
