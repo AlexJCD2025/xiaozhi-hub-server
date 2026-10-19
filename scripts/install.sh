@@ -85,7 +85,8 @@ else
   need=()
   command -v ffmpeg >/dev/null 2>&1 || need+=(ffmpeg)
   # Debian/Ubuntu 的普通用户 PATH 里没有 /sbin，直接调 ldconfig 会找不到命令
-  if ! ({ ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null; } | grep -q libopus); then need+=(opus); fi
+  # 不用 grep -q：它找到就提前退出，开着 pipefail 时 ldconfig 收到 SIGPIPE，会被误判成没装
+  if ! ({ ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null; } | grep libopus >/dev/null); then need+=(opus); fi
   if (( ${#need[@]} == 0 )); then info "opus、ffmpeg 已安装"; else
     if command -v apt-get >/dev/null 2>&1; then
       pkgs=(); for p in "${need[@]}"; do [[ "$p" == opus ]] && pkgs+=(libopus0) || pkgs+=(ffmpeg); done
