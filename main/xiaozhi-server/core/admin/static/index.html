@@ -196,31 +196,26 @@
   .stage { flex: 1 1 0; min-width: 118px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 12px;
            text-align: left; cursor: pointer; box-shadow: var(--shadow); }
   .stage:hover { border-color: var(--accent-line); }
-  .stage.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .stage .num { font-size: 11px; color: var(--muted); }
-  .stage .ico { font-size: 20px; line-height: 1.4; }
+  .stage.static { cursor: default; }
+  .stage.static:hover { border-color: var(--line); }
+  .stage .ico { font-size: 20px; line-height: 28px; height: 28px; }
   .stage b { display: block; font-size: 14px; }
-  .stage .mod { display: block; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .stage .mod { display: block; font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 2px; }
   .stage small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
   .arrow { align-self: center; color: var(--muted); flex: none; }
-  .params > div { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
-  .params > div:first-child { border-top: 0; }
-  .params .k { color: var(--muted); }
-  .branches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .branch { padding: 12px 14px; }
-  .branch b { display: block; font-size: 13px; margin-bottom: 2px; }
-  .branch span { color: var(--muted); font-size: 13px; }
-  .timeline { display: grid; gap: 10px; }
-  .tl-step { display: grid; grid-template-columns: 10em minmax(0, 1fr); gap: 16px; padding: 14px 18px; }
-  .tl-step .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; margin-right: 6px;
-                background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
-  .tl-step b { font-size: 14px; }
-  .tl-step small { display: block; color: var(--muted); font-size: 12px; margin: 4px 0 0 28px; }
-  .tl-step ul { margin: 0; padding-left: 18px; font-size: 13px; }
-  .tl-step li + li { margin-top: 4px; }
-  .msgs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .msg { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--soft); font-size: 12px; }
-  .msg code { color: var(--accent); font-size: 12px; }
+  .tips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .tip { padding: 14px 16px; }
+  .tips .card + .card { margin-top: 0; }
+  .tip b { display: block; font-size: 14px; margin-bottom: 6px; }
+  .tip .say { font-size: 13px; }
+  .tip .say::before { content: "你："; color: var(--muted); }
+  .tip .res { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .tip .res::before { content: "→ "; color: var(--accent); }
+  details.prompt-all > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 14px 22px; }
+  details.prompt-all > summary::-webkit-details-marker { display: none; }
+  details.prompt-all > summary .toggle { margin-left: auto; color: var(--muted); font-size: 12px; }
+  details.prompt-all[open] > summary { margin-bottom: 12px; }
+  .how-foot { margin-top: 28px; color: var(--muted); font-size: 13px; }
   .seg-card + .seg-card { margin-top: 12px; }
   .seg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 22px; }
   .seg-head .no { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
@@ -260,12 +255,10 @@
     .nav .ico { display: none; }
     .side-foot { display: none; }
     main { padding: 20px 16px 56px; }
-    .choices, .grid2, .grid3, .plugins, .branches, .levels { grid-template-columns: 1fr; }
+    .choices, .grid2, .grid3, .plugins, .tips, .levels { grid-template-columns: 1fr; }
     .cli-row { grid-template-columns: 1fr; gap: 6px; } .cli-k { padding-top: 0; }
     .flow { flex-direction: column; overflow: visible; }
-    .tl-step { grid-template-columns: 1fr; gap: 8px; }
     .arrow { transform: rotate(90deg); }
-    .params > div { grid-template-columns: 1fr; gap: 2px; }
     .tiles { grid-template-columns: 1fr 1fr; }
     .kv { grid-template-columns: max-content minmax(0, 1fr); }
     .kv .copy { display: none; }
@@ -531,7 +524,6 @@ function renderDevices(dev) {
 // ---------- 工作原理 ----------
 
 const SOURCE_PILL = { "服务端": "ok", "Claude Code": "warn" };
-let howStage = "llm";
 async function renderHow(root) {
   const d = await api("pipeline");
   const f = d.flow, p = d.prompt, m = p.marks;
@@ -542,49 +534,42 @@ async function renderHow(root) {
     return value.trim() ? `<mark title="${esc(name)}"><i>${esc(label)}</i>${value}</mark>` : `<mark title="${esc(name)}"><i>${esc(label)}</i>（空）</mark>`;
   });
   const plain = (text) => text.replace(markRe, (_, name, value) => value);
-  root.innerHTML = `
-    <div class="page-head"><div><h1>工作原理</h1><p class="sub">对设备说一句话之后，服务端每一步做了什么。内容按当前配置生成，修改设置后会跟着变。</p></div></div>
-    <div class="section-title">一次对话的完整经过 <span class="muted small" style="font-weight:400">从唤醒到断开</span></div>
-    <div class="timeline">${f.timeline.map((t, i) => `<div class="card tl-step">
-      <div><span class="n">${i + 1}</span><b>${esc(t.title)}</b><small>${esc(t.who)}</small></div>
-      <ul>${t.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>
-    <div class="section-title">一句话的旅程 <span class="muted small" style="font-weight:400">点每一步看细节</span></div>
-    <div class="flow">${f.stages.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}
-      <button class="stage ${s.id === howStage ? "on" : ""}" data-stage="${s.id}">
-        <span class="num">第 ${i + 1} 步</span><div class="ico">${s.icon}</div><b>${esc(s.title)}</b>
-        <span class="mod">${esc(s.module)}</span><small>${esc(s.summary)}</small></button>`).join("")}</div>
-    <div class="card" id="stage-detail" style="margin-top:6px"></div>
-    <div class="section-title">特殊情况（不走完整流程）</div>
-    <div class="branches">${f.branches.map((b) => `<div class="card branch"><b>${esc(b.title)}</b><span>${esc(b.text)}</span></div>`).join("")}</div>
-    <div class="section-title">设备每轮依次收到的消息</div>
-    <div class="msgs">${f.messages.map((x, i) => `${i ? '<span class="muted">→</span>' : ""}<div class="msg"><code>${esc(x.type)}</code> ${esc(x.text)}</div>`).join("")}</div>
-
-    <div class="section-title">提示词拆解 · 发给 ${esc(p.llm)} 的内容，按顺序拼在一起</div>
-    ${p.warnings.map((w) => `<div class="banner warn">${esc(w)}</div>`).join("")}
-    ${p.segments.map((s, i) => `<details class="card seg-card pseg" ${s.collapsed ? "" : "open"}>
-      <summary class="seg-head"><span class="no">${i + 1}</span><b>${esc(s.title)}</b>
-        <span class="pill ${SOURCE_PILL[s.source] ?? ""}">来源：${esc(s.source)}</span><span class="pill">${esc(s.when)}</span>
-        <span class="toggle">展开 / 收起</span></summary>
-      <p class="seg-note">${esc(s.note)}</p>
-      ${s.text ? `<pre class="prompt-text">${highlight(s.text)}</pre>
-        <div class="actions" style="margin:0;padding:0 22px 14px"><button class="btn sm" data-copyseg="${i}">复制这段</button></div>` : ""}
-    </details>`).join("")}
-    ${p.actual ? `<details class="card seg-card pseg"><summary class="seg-head"><b>在线设备 ${esc(p.actual.device_id || "")} 实际使用的系统提示词</b>
-        <span class="toggle">展开 / 收起</span></summary>
-      <p class="seg-note">这是这台设备连接时真正生成的版本（第 ${p.segments.findIndex((s) => s.id === "base") + 1} 段），可以和上面的预览对照。</p>
-      <pre class="prompt-text">${esc(p.actual.text)}</pre></details>` : ""}`;
-  const showStage = () => {
-    const s = f.stages.find((x) => x.id === howStage);
-    $("stage-detail").innerHTML = `<div class="card-head"><h2>${s.icon} ${esc(s.title)} · ${esc(s.module)}</h2></div>
-      <div class="panel params">${s.params.map((x) => `<div><span class="k">${esc(x.label)}</span><span>${esc(x.value)}</span></div>`).join("")}</div>`;
+  const stage = (s) => {
+    const body = `<div class="ico">${s.icon}</div><b>${esc(s.title)}</b><span class="mod">${esc(s.value)}</span><small>${esc(s.hint)}</small>`;
+    return s.page ? `<button class="stage" data-go="${esc(s.page)}" title="去设置">${body}</button>` : `<div class="stage static">${body}</div>`;
   };
-  root.querySelectorAll("[data-stage]").forEach((b) => (b.onclick = () => {
-    howStage = b.dataset.stage;
-    root.querySelectorAll("[data-stage]").forEach((x) => x.classList.toggle("on", x === b));
-    showStage();
-  }));
+  root.innerHTML = `
+    <div class="page-head"><div><h1>工作原理</h1><p class="sub">说一句话之后会发生什么、可以怎么跟它说话。内容按当前配置生成，修改设置后会跟着变。</p></div></div>
+    <div class="section-title">一句话怎么走 <span class="muted small" style="font-weight:400">点一步去改它的设置</span></div>
+    <div class="flow">${f.stages.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}${stage(s)}`).join("")}</div>
+
+    <div class="section-title">怎么跟它说话</div>
+    <div class="tips">${f.tips.map((t) => `<div class="card tip"><b>${esc(t.title)}</b>
+      <div class="say">${esc(t.say)}</div><div class="res">${esc(t.result)}</div></div>`).join("")}</div>
+
+    <div class="section-title">发给大模型的提示词 <span class="muted small" style="font-weight:400">调人设、排查回答不对劲时用得上</span></div>
+    <details class="prompt-all">
+      <summary class="card"><b>发给 ${esc(p.llm)} 的内容</b><span class="pill">${p.segments.length} 段，按顺序拼在一起</span>
+        <span class="toggle">展开 / 收起</span></summary>
+      ${p.warnings.map((w) => `<div class="banner warn">${esc(w)}</div>`).join("")}
+      ${p.segments.map((s, i) => `<details class="card seg-card pseg" ${s.collapsed ? "" : "open"}>
+        <summary class="seg-head"><span class="no">${i + 1}</span><b>${esc(s.title)}</b>
+          <span class="pill ${SOURCE_PILL[s.source] ?? ""}">来源：${esc(s.source)}</span><span class="pill">${esc(s.when)}</span>
+          <span class="toggle">展开 / 收起</span></summary>
+        <p class="seg-note">${esc(s.note)}</p>
+        ${s.text ? `<pre class="prompt-text">${highlight(s.text)}</pre>
+          <div class="actions" style="margin:0;padding:0 22px 14px"><button class="btn sm" data-copyseg="${i}">复制这段</button></div>` : ""}
+      </details>`).join("")}
+      ${p.actual ? `<details class="card seg-card pseg"><summary class="seg-head"><b>在线设备 ${esc(p.actual.device_id || "")} 实际使用的系统提示词</b>
+          <span class="toggle">展开 / 收起</span></summary>
+        <p class="seg-note">这是这台设备连接时真正生成的版本（第 ${p.segments.findIndex((s) => s.id === "base") + 1} 段），可以和上面的预览对照。</p>
+        <pre class="prompt-text">${esc(p.actual.text)}</pre></details>` : ""}
+    </details>
+
+    <p class="how-foot">每一步为什么这样设计、连接和 Claude Code 进程什么时候启动和关闭、哪些记录会保存，见 GitHub 上的
+      <a href="${esc(d.design_url)}" target="_blank" rel="noopener">设计细节 ↗</a>。</p>`;
+  root.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => openPage(b.dataset.go)));
   root.querySelectorAll("[data-copyseg]").forEach((b) => (b.onclick = () => copyText(plain(p.segments[+b.dataset.copyseg].text))));
-  showStage();
 }
 
 // ---------- 大模型 ----------

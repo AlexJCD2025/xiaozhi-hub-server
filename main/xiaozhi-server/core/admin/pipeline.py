@@ -1,6 +1,7 @@
-"""管理后台"工作原理"页：按当前配置描述一句话从设备到播放的完整流程，并拆解发给大模型的提示词。
+"""管理后台"工作原理"页：一句话经过的五步、"怎么跟它说话"速查，以及发给大模型的提示词。
 
-只读：不修改配置，也不影响运行中的服务。流程里的参数都从配置读取，切换模块后页面跟着变。
+面向正在用设备的人，只讲"说了什么会怎样"；为什么这样设计、每一步的实现细节在 hub-docs/design.md。
+只读：不修改配置，也不影响运行中的服务。页面上的值都从配置读取，切换模块后跟着变。
 提示词按原项目的拼装方式（core/utils/prompt_manager.py、core/utils/dialogue.py）重新渲染一份预览，
 模板变量用标记包起来，前端据此高亮显示"这里填进了什么"。
 """
@@ -11,7 +12,7 @@ from datetime import datetime
 from jinja2 import Template
 
 from config.config_loader import get_project_dir
-from core.admin import catalog, config_store, connections, pages
+from core.admin import catalog, connections, pages
 
 # 变量标记：\x01变量名\x02值\x03，前端换成高亮
 MARK_START, MARK_SEP, MARK_END = "\x01", "\x02", "\x03"
@@ -67,6 +68,8 @@ def _system_prompt_of(conn) -> str:
 
 # ---------- 流程 ----------
 
+DESIGN_DOC_URL = "https://github.com/justhalfbit/xiaozhi-hub-server/blob/main/hub-docs/design.md"
+
 def _voice_name(voice: str) -> str:
     info = next((v for v in catalog.EDGE_VOICES if v["value"] == voice), None)
     return f"{info['name']}（{info['group']}）" if info else voice
@@ -79,119 +82,57 @@ def _llm_label(name: str, entry: dict) -> str:
     return vendor["label"] if vendor else name
 
 
-def describe_flow(merged: dict) -> dict:
-    vad_name, vad = _entry(merged, "VAD")
+def _asr_label(name: str, entry: dict) -> str:
+    if entry.get("type") == "doubao_stream":
+        return "豆包流式识别"
+    if entry.get("type") == "sherpa_onnx_local":
+        if "x-asr" in str(entry.get("model_dir") or "").lower():
+            return "本地 X-ASR"
+        model_type = entry.get("model_type") or "sense_voice"
+        return "本地 " + pages.SHERPA_MODEL_LABELS.get(model_type, model_type)
+    return name or "未设置"
+
+
+def _claude_model_label(model) -> str:
+    option = next((o for o in catalog.CLAUDE_MODELS if o["value"] == model), None)
+    return option["label"] if option else (str(model) if model else "默认模型")
+
+
+def _effort_label(effort) -> str:
+    option = next((o for o in catalog.CLAUDE_EFFORTS if o["value"] == effort), None)
+    return option["label"] if option else "默认"
+
+
+def describe_stages(merged: dict) -> list:
+    """一句话经过的五步：每步只给当前用的模块和一个关键设置，点击跳到对应的设置页（page 为 None 表示后台没有设置页）。"""
+    _, vad = _entry(merged, "VAD")
     asr_name, asr = _entry(merged, "ASR")
     llm_name, llm = _entry(merged, "LLM")
     tts_name, tts = _entry(merged, "TTS")
-    intent_name, intent = _entry(merged, "Intent")
-    intent_type = intent.get("type", intent_name)
-    is_cli = llm.get("type") == "claude_cli"
-    calls = pages.describe_call_names(merged)
-    prebuffer = int(merged.get("tts_audio_prebuffer_count") or 5)
     silence = vad.get("min_silence_duration_ms", 1000)
+    prebuffer = int(merged.get("tts_audio_prebuffer_count") or 5)
 
-    stages = [
-        {
-            "id": "listen", "title": "设备收音", "module": vad_name, "icon": "🎙",
-            "summary": f"说完停顿 {silence}ms 算一句",
-            "params": [
-                {"label": "传输", "value": "设备把麦克风声音编码成 Opus，每 60ms 一包，经 WebSocket 发给服务端"},
-                {"label": "解码", "value": "服务端解码成 16kHz 单声道"},
-                {"label": "语音检测（VAD）", "value": f"{vad_name}：声音概率 ≥ {vad.get('threshold', 0.5)} 算说话，"
-                                                     f"≤ {vad.get('threshold_low', 0.3)} 算安静，安静超过 {silence}ms 判定这句说完"},
-                {"label": "太短不处理", "value": "不到 0.9 秒的声音直接忽略"},
-                {"label": "唤醒后", "value": "唤醒后 2 秒内不收音，避免把唤醒词本身识别进去"},
-            ],
-        },
-        {
-            "id": "asr", "title": "语音识别", "module": asr_name, "icon": "📝",
-            "summary": "本地识别，不联网" if asr.get("type") == "sherpa_onnx_local" else "云端识别",
-            "params": [
-                {"label": "模型", "value": f"{asr.get('type', asr_name)} · {asr.get('model_dir') or '云端服务'}"},
-                {"label": "结果", "value": "识别出的文字去掉首尾标点后，先发给设备显示（stt 消息），再进入下一步"},
-                {"label": "空结果", "value": "去掉标点后没有文字（例如只有噪音）就不往下走"},
-            ],
-        },
-        {
-            "id": "intent", "title": "意图识别", "module": "不用插件" if intent_type == "nointent" else
-            "用插件" if intent_type == "function_call" else intent_name, "icon": "🧭",
-            "summary": "先处理呼名、退出指令和唤醒词" if calls["enabled"] else "先检查退出指令和唤醒词",
-            "params": ([
-                {"label": "呼名", "value": f"句首是“嗨 + 称呼”时去掉称呼，把这台设备切到对应的模型并记住；"
-                                         f"只说称呼时直接回“{calls['reply']}”，不经过大模型"},
-            ] if calls["enabled"] else []) + [
-                {"label": "退出指令", "value": f"整句话是 {'、'.join(merged.get('exit_commands') or [])} 时直接断开，不经过大模型"},
-                {"label": "唤醒词", "value": "整句话是唤醒词时，播放缓存的回复，不经过大模型"},
-                {"label": "意图", "value":
-                    "不用插件：直接交给大模型" if intent_type == "nointent" else
-                    "用插件：把插件当作工具清单交给大模型，由它决定要不要调用；一轮最多连续调用 5 次工具"
-                    if intent_type == "function_call" else f"{intent_name}：先用一个模型判断要不要调插件"},
-            ],
-        },
-        {
-            "id": "llm", "title": "大模型", "module": _llm_label(llm_name, llm), "icon": "✦",
-            "summary": f"{llm.get('model') or '默认模型'} · 思考力度 {llm.get('effort') or '默认'}" if is_cli
-            else str(llm.get("model_name") or ""),
-            "params": _llm_params(llm, is_cli),
-        },
-        {
-            "id": "emotion", "title": "表情", "module": "开头的 emoji", "icon": "🙂",
-            "summary": "单独发给设备换脸",
-            "params": [
-                {"label": "提取", "value": "大模型回复的第一段里找第一个 emoji，对应成情绪名，例如 😂 → funny；找不到时用 🙂 happy"},
-                {"label": "发送", "value": "发一条 llm 消息给设备：{\"type\": \"llm\", \"text\": \"😂\", \"emotion\": \"funny\"}，设备据此换表情"},
-                {"label": "每轮一次", "value": "每轮只发一次" + ("；先说了填充语时，会在正式回复开头再找一次表情并重发" if is_cli else "")},
-                {"label": "朗读时", "value": "emoji 不会被念出来，切句后会全部去掉"},
-            ],
-        },
-        {
-            "id": "tts", "title": "语音合成", "module": tts_name, "icon": "🔊",
-            "summary": f"音色：{_voice_name(str(tts.get('voice') or ''))}" if tts.get("type") == "edge" else tts.get("type", ""),
-            "params": [
-                {"label": "切句", "value": "边收大模型的回复边切句：第一句遇到逗号就切（让设备尽早开口），后面的句子遇到句号、问号、感叹号、分号才切"},
-                {"label": "清理", "value": "去掉 emoji、Markdown 符号（加粗、列表、代码块、表格等）和换行"},
-                {"label": "合成", "value": f"{tts_name} 逐句合成语音，转成 24kHz Opus，每 60ms 一包"},
-            ],
-        },
-        {
-            "id": "play", "title": "设备播放", "module": f"预缓冲 {prebuffer} 帧", "icon": "📢",
-            "summary": f"约 {prebuffer * 60 / 1000:.1f} 秒缓冲",
-            "params": [
-                {"label": "预缓冲", "value": f"每句开头先一口气发 {prebuffer} 包（约 {prebuffer * 60 / 1000:.1f} 秒），之后按 60ms 一包匀速发送，避免 Wi-Fi 抖动导致断续"},
-                {"label": "字幕", "value": "每句开始前发一条 sentence_start 消息，设备屏幕显示这句话"},
-                {"label": "结束", "value": "等设备把缓冲里的声音播完，再发 tts stop，设备回到收音状态"},
-                {"label": "打断", "value": "说话时点屏幕或说唤醒词，服务端清空待发的声音并立即发 tts stop；"
-                                        f"设备里已缓冲的约 {prebuffer * 60 / 1000:.1f} 秒会播完才停"},
-            ],
-        },
+    if llm.get("type") == "claude_cli":
+        llm_value = f"Claude Code · {_claude_model_label(llm.get('model'))}"
+        llm_hint = f"思考力度：{_effort_label(llm.get('effort'))}"
+    else:
+        llm_value = _llm_label(llm_name, llm)
+        llm_hint = str(llm.get("model_name") or "")
+    if tts.get("type") == "edge":
+        tts_value, tts_hint = f"EdgeTTS · {_voice_name(str(tts.get('voice') or ''))}", "微软在线语音，需要联网"
+    else:
+        tts_value, tts_hint = tts_name or "未设置", str(tts.get("type") or "")
+    local_asr = asr.get("type") == "sherpa_onnx_local"
+    return [
+        {"id": "listen", "icon": "🎙", "title": "收音", "value": f"停顿 {silence}ms 算说完",
+         "hint": "说话中间停顿太久会被截成两句", "page": "asr"},
+        {"id": "asr", "icon": "📝", "title": "识别", "value": _asr_label(asr_name, asr),
+         "hint": "在本机识别，不联网" if local_asr else "云端识别，需要联网", "page": "asr"},
+        {"id": "llm", "icon": "✦", "title": "大模型", "value": llm_value, "hint": llm_hint, "page": "llm"},
+        {"id": "tts", "icon": "🔊", "title": "合成", "value": tts_value, "hint": tts_hint, "page": "tts"},
+        {"id": "play", "icon": "📢", "title": "播放", "value": f"缓冲约 {prebuffer * 60 / 1000:.1f} 秒",
+         "hint": "说话断续时，在配置文件里调大", "page": None},
     ]
-
-    branches = ([
-        {"title": "只说称呼", "text": f"只说“嗨 + 称呼”时，服务端切换模型后直接回“{calls['reply']}”，不经过大模型，也不启动 Claude Code 进程"},
-    ] if calls["enabled"] else []) + [
-        {"title": "唤醒词", "text": "说唤醒词（例如“嘿，你好呀”）时不经过大模型，直接播放缓存的回复，例如“您请说，我正听着。”"},
-        {"title": "退出指令", "text": f"整句话是“{'”“'.join(merged.get('exit_commands') or [])}”时立即断开连接，没有回复"},
-        {"title": "长时间不说话", "text": "；".join(_idle_close(merged))},
-    ]
-    if is_cli:
-        branches += [
-            {"title": "填充语", "text": f"Claude 超过 {llm.get('filler_delay_seconds', 2)} 秒还没开口时，先说“{llm.get('first_reply_filler') or '（未设置）'}”"},
-            {"title": "接续上次对话", "text": f"{llm.get('resume_window_minutes', 120)} 分钟内重新连接会自动接着聊；超过后说"
-                                        f"“{'”“'.join(llm.get('resume_keywords') or [])}”才会接回旧会话"},
-            {"title": "出错时", "text": "Claude 没登录、额度用完、超时等情况，会直接念一句中文说明，例如“Claude 现在用量到上限了，稍后再试吧。”"},
-        ]
-
-    messages = [
-        {"type": "stt", "text": "识别出的文字，设备屏幕显示"},
-        {"type": "tts · start", "text": "服务端开始说话"},
-        {"type": "llm", "text": "表情（emoji 和情绪名）"},
-        {"type": "tts · sentence_start", "text": "每句话的字幕，后面紧跟这句的语音包"},
-        {"type": "（Opus 语音包）", "text": "每包 60ms"},
-        {"type": "tts · stop", "text": "说完了，设备回到收音"},
-    ]
-    return {"stages": stages, "branches": branches, "messages": messages,
-            "timeline": describe_timeline(merged, calls)}
 
 
 def _duration(seconds) -> str:
@@ -205,110 +146,64 @@ def _duration(seconds) -> str:
     return f"{int(seconds)} 秒"
 
 
-def _idle_close(merged: dict) -> list:
-    """两道"没人说话就断开"：第一道说告别语，第二道兜底直接断开。两道看的是同一个"最后活动时间"。"""
+def _quoted(words, sep: str = "") -> str:
+    return sep.join(f"“{w}”" for w in words)
+
+
+def describe_tips(merged: dict) -> list:
+    """"你这样说 → 会这样"的速查卡片，值都从当前配置读取。"""
+    calls = pages.describe_call_names(merged)
+    llms = merged.get("LLM") or {}
+    default_name = (merged.get("selected_module") or {}).get("LLM")
+    called = [m["entry"] for m in calls["models"]] if calls["enabled"] else []
+    names = [default_name, *called]
+    cli = next((llms[n] for n in names if isinstance(llms.get(n), dict) and llms[n].get("type") == "claude_cli"), None)
+    has_api = any(isinstance(llms.get(n), dict) and llms[n].get("type") != "claude_cli" for n in names)
+
+    tips = [{"title": "唤醒", "say": "说“Hi, StackChan”，或点一下屏幕",
+             "result": "设备开始听你说话。交给这台设备上次用的模型，第一次用时是 "
+                       f"{_llm_label(default_name, llms.get(default_name) or {})}"}]
+    if calls["enabled"]:
+        aliases = "；".join(f"{m['label']}：{'、'.join(m['aliases'])}" for m in calls["models"])
+        tips.append({"title": "换模型", "say": "句首说“嗨 + 称呼”，后面可以直接接内容",
+                     "result": f"换成对应的模型回答，之后一直用它；只说称呼时回一声“{calls['reply']}”。"
+                               + (f"现在的称呼 —— {aliases}" if aliases else "还没有配置称呼")})
+    tips.append({"title": "打断", "say": "设备说话时，点一下屏幕上的脸",
+                 "result": "马上停下，然后可以说下一句。设备说话时不收音，不能直接插话"})
+    if cli:
+        progress = cli.get("progress_interval_seconds", 30)
+        tips.append({"title": "长任务", "say": "让 Claude 做要几分钟的事",
+                     "result": f"设备陪着等，最长 {_duration(cli.get('turn_timeout_seconds', 600))}"
+                               + (f"；{_duration(progress)}没开口就提示一次进度" if progress else "")
+                               + "。被停下或打断后，说“继续”接着做"})
+        window = float(cli.get("resume_window_minutes", 120) or 0)
+        keywords = cli.get("resume_keywords") or ["接着上次聊"]
+        said = _quoted(keywords[:2], "或")
+        result = (f"{_duration(window * 60)}内再唤醒，Claude 自动接上上次的对话；隔得更久的，说{said}也能接上"
+                  if window else f"说{said}接上上次的对话")
+        if has_api:
+            result += "。API 模型断开后就不记得了"
+        tips.append({"title": "接着上次聊", "say": "过一会儿再唤醒设备", "result": result})
+    elif has_api:
+        tips.append({"title": "接着上次聊", "say": "过一会儿再唤醒设备",
+                     "result": "API 模型只记得这次连接里的对话，断开后从头开始"})
+
     first = int(merged.get("close_connection_no_voice_time", 120) or 120)
     end_prompt = merged.get("end_prompt") or {}
     if end_prompt.get("enable", True) is False:
-        action = "直接断开"
+        farewell = "直接断开"
     elif end_prompt.get("reply"):
-        action = f"说一句“{end_prompt['reply']}”后断开"
+        farewell = f"说一句“{end_prompt['reply']}”后断开"
     else:
-        action = "让大模型说一句告别语后断开"
-    return [
-        f"设备在收音、但 {_duration(first)}没人说话：{action}",
-        f"{_duration(first + 60)}没有任何动静（设备没发声音和文字、服务端也没在说话）：兜底直接断开，没有告别语",
-    ]
+        farewell = "说一句告别语后断开"
+    exits = merged.get("exit_commands") or []
+    tips.append({"title": "结束", "say": f"说{_quoted(exits)}" if exits else "不再说话",
+                 "result": ("立即断开。" if exits else "") + f"{_duration(first)}没人说话时，{farewell}"})
+    return tips
 
 
-def describe_timeline(merged: dict, calls: dict) -> list:
-    """从唤醒到断开，一次对话的完整经过。每一步标出是设备还是服务端在做，时长等参数从配置读取。"""
-    llms = merged.get("LLM") or {}
-    default_name = (merged.get("selected_module") or {}).get("LLM")
-    default_label = _llm_label(default_name, llms.get(default_name) or {})
-    called = [m["entry"] for m in calls["models"]] if calls["enabled"] else []
-    cli_names = [n for n in [default_name, *called]
-                 if isinstance(llms.get(n), dict) and llms[n].get("type") == "claude_cli"]
-    has_api = any(isinstance(llms.get(n), dict) and llms[n].get("type") != "claude_cli" for n in [default_name, *called])
-    cli = llms[cli_names[0]] if cli_names else {}
-    window = cli.get("resume_window_minutes", 120)
-    idle = cli.get("idle_timeout_seconds", 300)
-    keywords = "”“".join(cli.get("resume_keywords") or ["接着上次聊", "继续上次的话题", "继续刚才的话题", "接着刚才聊"])
-    reply = calls["reply"]
-
-    wake = [
-        "说“Hi, StackChan”：唤醒词由设备自己识别（固件里），不经过服务端",
-        "设备连上本地服务，并把唤醒词当作一句话发过来（StackChan 固定发“嘿，你好呀”）；"
-        "服务端认出是唤醒词，播放缓存的问候，不经过大模型",
-        "点一下屏幕也能唤醒：设备直接开始收音，没有问候",
-    ]
-    wake.append(f"服务端把这台设备切到它上次用的模型（第一次连上的设备用默认模型 {default_label}）；这时还不启动 Claude Code 进程"
-                if calls["enabled"] else f"所有话都交给默认模型 {default_label}；这时还不启动 Claude Code 进程")
-    steps = [{"title": "唤醒", "who": "设备 → 服务端", "items": wake}]
-
-    if calls["enabled"]:
-        names = "；".join(f"{m['label']}：{'、'.join(m['aliases'])}" for m in calls["models"])
-        steps.append({"title": "叫模型（可选）", "who": "服务端", "items": [
-            f"只说“嗨 + 称呼”：切到这个模型并记住，回一声“{reply}”，不启动 Claude Code 进程",
-            "“嗨 + 称呼 + 内容”：去掉称呼，把内容交给这个模型",
-            "不说称呼：交给这台设备上次用的模型",
-            f"现在的称呼 —— {names}" if names else "还没有配置称呼",
-        ]})
-
-    first = []
-    if cli_names:
-        first += [
-            "交给 Claude 时，这一刻才启动 Claude Code 进程，同时决定接上旧会话还是新开",
-            f"说的是“{keywords}”：接回上次的会话，不管隔了多久",
-            f"普通的话：距上次对话不超过 {_duration(float(window) * 60)} 就自动接上，否则新开会话",
-            "接续指令后面还带着内容时（如“接着上次聊那个 bug”），接上后把整句交给 Claude",
-        ]
-    if has_api:
-        first.append("交给 API 模型时：对话只在这次连接内有效，断开后清空，接续指令会当普通的话交给模型")
-    steps.append({"title": "第一句话", "who": "服务端", "items": first or ["交给当前模型"]})
-
-    during = ["后面每句话直接交给当前模型" + ("；Claude Code 进程已在运行，不再判断接续" if cli_names else "")]
-    if cli_names:
-        progress = cli.get("progress_interval_seconds", 30)
-        during.append(f"Claude 干长任务时设备陪着等，最长 {_duration(cli.get('turn_timeout_seconds', 600))}，期间连接不会断开"
-                      + (f"；{_duration(progress)}没开口就说“{cli.get('progress_reply') or '还在处理，请稍等'}”，"
-                         f"之后报已用时间，间隔逐渐拉长到 {_duration(float(progress) * 4)}" if progress else "")
-                      + "；这段时间设备不收音，想说话先点屏幕打断")
-    if calls["enabled"]:
-        during.append("说“嗨 + 别的称呼”随时换模型；每个模型只记得跟自己的对话，切回来接着原来的聊")
-    during.append("打断：设备说话时点一下屏幕上的脸，或说唤醒词")
-    steps.append({"title": "对话中", "who": "服务端", "items": during})
-
-    end = _idle_close(merged)
-    if cli_names:
-        end.append(f"Claude Code 进程空闲 {_duration(idle)}或设备断开时关闭；切到别的模型后不马上关，等空闲超时再关，方便切回来")
-        end.append("进程因空闲关闭后再说话：重新启动进程，按“第一句话”的规则判断接续")
-    if calls["enabled"]:
-        end.append("下次唤醒：还是上次用的模型" + ("，接续规则同上" if cli_names else ""))
-    steps.append({"title": "结束", "who": "服务端", "items": end})
-    return steps
-
-
-def _llm_params(llm: dict, is_cli: bool) -> list:
-    if is_cli:
-        return [
-            {"label": "每轮发送", "value": "只发这一轮识别出的文字；之前的对话保存在 Claude Code 的会话里，不重复发送"},
-            {"label": "提示词", "value": "Claude Code 进程启动时一次性传入（见下方“提示词拆解”），进程存活期间不变"},
-            {"label": "进程", "value": f"每台设备一个 Claude Code 进程；空闲 {llm.get('idle_timeout_seconds', 300)} 秒或设备断开时关闭"},
-            {"label": "工作目录", "value": str(llm.get("workdir") or "")},
-            {"label": "允许的工具", "value": "、".join(llm.get("allowed_tools") or []) or "无"},
-            {"label": "超时", "value": f"单轮最长 {llm.get('turn_timeout_seconds', 600)} 秒；连续 {llm.get('stall_timeout_seconds', 30)} 秒没有任何动静就中断（执行工具时不算）"},
-            {"label": "长任务", "value": "干活期间连接不会因为没人说话断开" + (
-                f"；{llm.get('progress_interval_seconds', 30)} 秒没开口就说“{llm.get('progress_reply') or '还在处理，请稍等'}”，之后报已用时间，间隔逐渐拉长"
-                if llm.get("progress_interval_seconds", 30) else "")},
-            {"label": "回复", "value": "边生成边往下传（流式），不用等整段写完"},
-        ]
-    return [
-        {"label": "每轮发送", "value": "系统提示词 + 全部历史对话 + 这一轮的话（OpenAI 协议，流式返回）"},
-        {"label": "接口", "value": str(llm.get("base_url") or llm.get("url") or "")},
-        {"label": "最大输出", "value": str(llm.get("max_tokens") or "默认")},
-        {"label": "关闭思考", "value": "对 DeepSeek、通义千问、智谱、Kimi、豆包、Claude 官方接口自动关闭深度思考，减少首字等待"},
-    ]
+def describe_flow(merged: dict) -> dict:
+    return {"stages": describe_stages(merged), "tips": describe_tips(merged)}
 
 
 # ---------- 提示词拆解 ----------
@@ -429,4 +324,4 @@ def describe_prompt(merged: dict) -> dict:
 
 
 def describe(merged: dict) -> dict:
-    return {"flow": describe_flow(merged), "prompt": describe_prompt(merged)}
+    return {"flow": describe_flow(merged), "prompt": describe_prompt(merged), "design_url": DESIGN_DOC_URL}
