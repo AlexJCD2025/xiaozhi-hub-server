@@ -62,7 +62,8 @@ bash scripts/start.sh     # 启动
 | `main/manager-api`、`main/manager-web`、`main/manager-mobile` | 未用到：上游的智控台，本项目用自带的网页管理后台代替 |
 | `main/digital-human` | 未用到：上游的数字人前端 |
 | `main/README.md`、`main/README_en.md`、`docs/` 下的其他文档 | 未用到：上游的说明文档，部分内容不适用于本项目 |
-| `Dockerfile-*`、`docker-setup.sh`、`Makefile`、`.dockerignore` | 未用到：上游的 Docker 部署 |
+| `Dockerfile-*`、`docker-setup.sh`、`.dockerignore` | 未用到：上游的 Docker 部署 |
+| `Makefile` | 未用到：上游的测试入口（含智控台的 Java、前端测试） |
 
 ## 许可
 
