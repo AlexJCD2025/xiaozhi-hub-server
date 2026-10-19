@@ -28,13 +28,15 @@ LLM:
     workdir: ~/xiaozhi-workspace    # Claude Code 只能访问这个目录
     allowed_tools: [Read, Grep, Glob]   # 默认只读；放开 Bash/Write 等需谨慎
     permission_mode: default
-    turn_timeout_seconds: 120
-    stall_timeout_seconds: 30       # 连续这么久没有任何响应（卡住）就中断并提示
+    turn_timeout_seconds: 600       # 一个任务最长做多久；干活期间设备陪着等，连接不会断开
+    stall_timeout_seconds: 30       # 连续这么久没有任何响应（卡住）就中断并提示；执行工具时不算
     idle_timeout_seconds: 300
     resume_window_minutes: 120
     resume_keywords: [接着上次聊, 继续上次的话题, 继续刚才的话题, 接着刚才聊]
     first_reply_filler: 好的，我看一下
     filler_delay_seconds: 2
+    progress_interval_seconds: 30   # 干活时这么久没开口，就说一句进度；填 0 关闭
+    progress_reply: 还在处理，请稍等
 
   # Claude API（OpenAI 兼容接口），在管理后台填写 API Key 后可切换使用
   ClaudeAPI:

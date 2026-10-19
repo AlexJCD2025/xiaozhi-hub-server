@@ -6,7 +6,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolUseBlock
+from claude_agent_sdk import (AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolResultBlock, ToolUseBlock,
+                              UserMessage)
 
 from core.agent import claude_session as cs_mod
 from core.agent.agent_session import AgentSessionError, Done, Error, ErrorKind, TextDelta
@@ -116,11 +117,23 @@ async def test_interrupted_result_is_done_not_error():
 
 async def test_activity_reported_for_non_text_events_and_throttled():
     s = session_with([assistant(ToolUseBlock(id="t", name="Glob", input={"pattern": "*"})),
-                      assistant(ToolUseBlock(id="t2", name="Read", input={})), delta("好"), result()])
+                      assistant(TextBlock("先看看")), assistant(TextBlock("再看看")), delta("好"), result()])
     evs = await collect(s)
     acts = [e for e in evs if type(e).__name__ == "Activity"]
     assert len(acts) == 1  # 1 秒内的多个非文字事件只上报一次
-    assert [e.text for e in evs if isinstance(e, TextDelta)] == ["好"]
+    assert any(isinstance(e, TextDelta) and e.text == "好" for e in evs)
+
+
+async def test_activity_reports_running_tools_immediately():
+    """正在执行的工具数一变就上报（不受 1 秒节流限制），调用方据此判断"在跑工具"还是"卡住"。"""
+    s = session_with([assistant(ToolUseBlock(id="t1", name="Bash", input={"command": "make"})),
+                      assistant(ToolUseBlock(id="t2", name="Read", input={})),
+                      UserMessage(content=[ToolResultBlock(tool_use_id="t1", content="ok")]),
+                      UserMessage(content=[ToolResultBlock(tool_use_id="t2", content="ok")]),
+                      assistant(ToolUseBlock(id="sub", name="Grep", input={}), parent="t9"),  # 子代理的不算
+                      delta("好"), result()])
+    evs = await collect(s)
+    assert [e.tools_running for e in evs if type(e).__name__ == "Activity"] == [1, 2, 1, 0]
 
 
 async def test_error_result_without_interrupt():
@@ -254,6 +267,9 @@ class FakeAgent:
         if FakeAgent.delay:
             await real_sleep(FakeAgent.delay)
         for ev in (FakeAgent.script.pop(0) if FakeAgent.script else [TextDelta("🙂好"), Done()]):
+            if isinstance(ev, (int, float)):
+                await real_sleep(ev)  # 脚本里的数字表示停顿几秒
+                continue
             yield ev
 
     async def interrupt(self):
@@ -520,6 +536,48 @@ def test_activity_keeps_turn_alive(provider):
     c = conn()
     provider.on_conn_open(c)
     assert run(provider, c, "查一下").endswith("🙂查完了")
+
+
+def test_running_tool_is_not_a_stall(provider):
+    """工具执行期间（比如一条很慢的命令）很久没有事件，不算卡住，只受单轮超时限制。"""
+    from core.agent.agent_session import Activity
+    provider.filler, provider.stall_timeout, provider.turn_timeout = "", 0.3, 5
+    FakeAgent.script = [[Activity("AssistantMessage", tools_running=1), 1.0,
+                         Activity("UserMessage", tools_running=0), TextDelta("🙂编译好了"), Done()]]
+    c = conn()
+    provider.on_conn_open(c)
+    assert run(provider, c, "编译一下") == "🙂编译好了"
+
+
+def test_long_turn_keeps_connection_alive(provider):
+    """干活期间不断刷新连接的活动时间，否则服务端会把"没有任何动静"的连接兜底断开，进程也跟着关。"""
+    provider.filler, provider.stall_timeout, provider.turn_timeout = "", 5, 5
+    FakeAgent.script = [[1.0, TextDelta("🙂好了"), Done()]]
+    c = conn()
+    c.last_activity_time = 0
+    provider.on_conn_open(c)
+    t0 = time.time() * 1000
+    run(provider, c, "干个活")
+    assert c.last_activity_time >= t0 + 800
+
+
+def test_progress_reply_when_silent_too_long(provider):
+    provider.filler, provider.stall_timeout, provider.turn_timeout = "好的我看一下。", 5, 5
+    provider.filler_delay, provider.progress_interval = 0.1, 0.5
+    FakeAgent.script = [[1.8, TextDelta("🙂做完了"), Done()]]
+    c = conn()
+    provider.on_conn_open(c)
+    out = run(provider, c, "干个活")
+    assert out.startswith("😶好的我看一下。") and out.endswith("🙂做完了")
+    assert out.count(provider.progress_reply) >= 2  # 填充语之后，每 0.5 秒没开口说一次
+
+
+def test_progress_not_inserted_mid_sentence(provider):
+    provider.filler, provider.stall_timeout, provider.turn_timeout, provider.progress_interval = "", 5, 5, 0.3
+    FakeAgent.script = [[TextDelta("🙂我先看看那个"), 0.8, TextDelta("文件。"), Done()]]
+    c = conn()
+    provider.on_conn_open(c)
+    assert run(provider, c, "看看") == "🙂我先看看那个文件。"  # 半句话中间不插进度
 
 
 def test_abort_and_close_hooks(provider):

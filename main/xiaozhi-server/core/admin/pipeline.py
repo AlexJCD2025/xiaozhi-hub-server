@@ -268,6 +268,10 @@ def describe_timeline(merged: dict, calls: dict) -> list:
     steps.append({"title": "第一句话", "who": "服务端", "items": first or ["交给当前模型"]})
 
     during = ["后面每句话直接交给当前模型" + ("；Claude Code 进程已在运行，不再判断接续" if cli_names else "")]
+    if cli_names:
+        progress = cli.get("progress_interval_seconds", 30)
+        during.append(f"Claude 干长任务时设备陪着等，最长 {_duration(cli.get('turn_timeout_seconds', 600))}，期间连接不会断开"
+                      + (f"；每 {_duration(progress)}没开口就说一句“{cli.get('progress_reply') or '还在处理，请稍等'}”" if progress else ""))
     if calls["enabled"]:
         during.append("说“嗨 + 别的称呼”随时换模型；每个模型只记得跟自己的对话，切回来接着原来的聊")
     during.append("打断：设备说话时点一下屏幕上的脸，或说唤醒词")
@@ -291,7 +295,10 @@ def _llm_params(llm: dict, is_cli: bool) -> list:
             {"label": "进程", "value": f"每台设备一个 Claude Code 进程；空闲 {llm.get('idle_timeout_seconds', 300)} 秒或设备断开时关闭"},
             {"label": "工作目录", "value": str(llm.get("workdir") or "")},
             {"label": "允许的工具", "value": "、".join(llm.get("allowed_tools") or []) or "无"},
-            {"label": "超时", "value": f"单轮最长 {llm.get('turn_timeout_seconds', 120)} 秒；连续 {llm.get('stall_timeout_seconds', 30)} 秒没有任何动静就中断"},
+            {"label": "超时", "value": f"单轮最长 {llm.get('turn_timeout_seconds', 600)} 秒；连续 {llm.get('stall_timeout_seconds', 30)} 秒没有任何动静就中断（执行工具时不算）"},
+            {"label": "长任务", "value": "干活期间连接不会因为没人说话断开" + (
+                f"；每 {llm.get('progress_interval_seconds', 30)} 秒没开口就说一句“{llm.get('progress_reply') or '还在处理，请稍等'}”"
+                if llm.get("progress_interval_seconds", 30) else "")},
             {"label": "回复", "value": "边生成边往下传（流式），不用等整段写完"},
         ]
     return [

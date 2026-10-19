@@ -290,6 +290,18 @@ async def test_emotion_single_and_stop(client):
 
 # ---------- 呼名 ----------
 
+def test_claude_cli_new_fields_can_be_added(cfg_path):
+    """老配置里没有的进度提示两项，后台也能设置；留空不写入、不报错。"""
+    assert pages.save_claude_cli({"progress_interval_seconds": "", "progress_reply": ""}, merged(cfg_path), cfg_path) == []
+    changed = pages.save_claude_cli({"progress_interval_seconds": "45", "progress_reply": "还在弄"}, merged(cfg_path), cfg_path)
+    assert set(changed) == {"progress_interval_seconds", "progress_reply"}
+    entry = merged(cfg_path)["LLM"]["ClaudeCLI"]
+    assert entry["progress_interval_seconds"] == 45 and entry["progress_reply"] == "还在弄"
+    with pytest.raises(ValueError):
+        pages.save_claude_cli({"progress_interval_seconds": "-1"}, merged(cfg_path), cfg_path)
+    assert pages.save_claude_cli({"progress_interval_seconds": "0"}, merged(cfg_path), cfg_path)  # 0 表示关闭
+
+
 def test_describe_call_names_defaults(cfg_path):
     d = pages.describe_call_names(merged(cfg_path))
     assert d["enabled"] is True and d["default"] == "ClaudeCLI"
