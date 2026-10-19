@@ -28,6 +28,13 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $
     $devRepo = ($shallow -eq "false")
 }
 
+# Windows 不能删除正在被使用的目录：PowerShell 窗口停在安装目录里（例如先 cd 进去再运行本脚本）时，目录会删不掉、只删掉一半。
+# 本脚本是新开的 powershell 进程，起始位置就是那个窗口的当前目录，在这里先检查
+$here = (Get-Location).ProviderPath.TrimEnd('\')
+if (-not $devRepo -and ($here -ieq $Root.TrimEnd('\') -or $here.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase))) {
+    Fail "当前 PowerShell 窗口在安装目录里，Windows 删不掉正在使用的目录。请先运行 cd ~ 离开这个目录，再运行：powershell -ExecutionPolicy Bypass -File `"$Root\scripts\uninstall.ps1`""
+}
+
 Write-Host "`n将要卸载 xiaozhi-hub-server："
 if ($devRepo) { Info "这是完整的 git 仓库，可能是开发用的，不删除目录：$Root" }
 else {
@@ -48,8 +55,11 @@ if ($running) { Fail "服务还在运行（端口 $port）。请在运行 start.
 if ($devRepo) { Write-Host "`n目录 $Root 没有删除，确认不需要后请手动删除。" }
 else {
     Step "删除安装目录"
+    # Set-Location 只改 PowerShell 的位置，进程自己的当前目录要另外改，否则也会占住安装目录
     Set-Location $env:USERPROFILE
-    Remove-Item -Recurse -Force $Root
+    [Environment]::CurrentDirectory = $env:USERPROFILE
+    try { Remove-Item -Recurse -Force $Root }
+    catch { Fail "有文件正被别的程序占用，没有删干净：$($_.Exception.Message)`n    请关掉正在使用这个目录的程序（例如打开着它的资源管理器窗口、编辑器）后，手动删除 $Root" }
     Info "已删除：$Root"
 }
 
