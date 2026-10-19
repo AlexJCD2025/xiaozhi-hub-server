@@ -362,16 +362,17 @@ class LLMProvider(LLMProviderBase):
                     return
                 agent, recorded = st.agent, False
                 async for ev in agent.send(text):
-                    if not recorded and not isinstance(ev, Error):
-                        # Claude 已经开始处理，会话已存在于本机。马上记下来：这一轮如果超时卡死、进程被强制关闭，
-                        # 下一句话启动新进程时也能接回这个会话（原来要等一轮正常结束才记，新会话的第一轮卡死就接不上了）
+                    if not recorded and isinstance(ev, (TextDelta, Activity)):
+                        # Claude 已经开始处理（说话或干活），会话已存在于本机。马上记下来：这一轮如果超时卡死、进程被强制关闭，
+                        # 下一句话启动新进程时也能接回这个会话（原来要等一轮正常结束才记，新会话的第一轮卡死就接不上了）。
+                        # 只有错误和收尾的 Done 时不记（例如没登录），免得覆盖之前能接续的会话
                         self.store.touch(st.key, agent.session_id)
                         recorded = True
                     out.put(ev)
                     if isinstance(ev, Error) and ev.kind == ErrorKind.PROCESS_EXITED:
                         st.agent = None
-                if st.agent:
-                    self.store.touch(st.key, st.agent.session_id)
+                if recorded and st.agent:
+                    self.store.touch(st.key, st.agent.session_id)  # 更新最后活跃时间
             except AgentSessionError as e:
                 out.put(Error(e.kind, e.detail))
             except asyncio.CancelledError:
