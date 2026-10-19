@@ -12,7 +12,7 @@ tts_audio_prebuffer_count: 15
 
 selected_module:
   VAD: SileroVAD
-  ASR: SherpaASR          # 语音识别：本地 SenseVoice（sherpa-onnx），不需要联网
+  ASR: SherpaXASR         # 语音识别：本地 X-ASR 中英混合（sherpa-onnx），不需要联网
   LLM: ClaudeCLI          # 安装时根据是否找到 Claude Code 自动选择
   TTS: EdgeTTS
   Memory: nomem

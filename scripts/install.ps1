@@ -1,17 +1,19 @@
 ﻿# xiaozhi-hub-server 一键安装（Windows PowerShell）
 # ⚠️ 未实测：本脚本按 macOS 上实测过的 install.sh 逐步对照编写，尚未在 Windows 上运行验证。
 # 用法（在项目根目录）：powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-#   只装默认组合需要的依赖（不含 torch），语音识别使用 sherpa-onnx 版 SenseVoice（模型约 240MB）
-# 可选环境变量：$env:UV_INDEX_URL（Python 包镜像），$env:ASSUME_YES = "1"（非交互）
+#   只装默认组合需要的依赖（不含 torch），语音识别使用 sherpa-onnx 版 X-ASR 中英混合模型（约 175MB）
+# 可选环境变量：$env:UV_INDEX_URL（Python 包镜像），$env:HF_ENDPOINT（Hugging Face 镜像，如 https://hf-mirror.com），$env:ASSUME_YES = "1"（非交互）
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Server = Join-Path $Root "main\xiaozhi-server"
 $Venv = Join-Path $Server ".venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
-# 默认的语音识别模型：sherpa-onnx 版 SenseVoice（int8），目录与原项目 config.yaml 中 SherpaASR 的 model_dir 一致
-$SherpaDir = Join-Path $Server "models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
-$SherpaUrl = "https://modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master"
+# 默认的语音识别模型：sherpa-onnx 版 X-ASR（int8），目录与 config.yaml 中 SherpaXASR 的 model_dir 一致
+$XasrName = "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03"
+$XasrDir = Join-Path $Server "models\$XasrName"
+$HfEndpoint = if ($env:HF_ENDPOINT) { $env:HF_ENDPOINT } else { "https://huggingface.co" }
+$XasrUrl = "$HfEndpoint/csukuangfj2/$XasrName/resolve/main"
 $Config = Join-Path $Server "data\.config.yaml"
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -86,9 +88,12 @@ else {
 }
 
 # ---------- 6. 语音识别模型 ----------
-Step "下载语音识别模型 SenseVoice（sherpa-onnx int8 版，约 240MB）"
-Download "$SherpaUrl/model.int8.onnx" (Join-Path $SherpaDir "model.int8.onnx") 200000000
-Download "$SherpaUrl/tokens.txt" (Join-Path $SherpaDir "tokens.txt") 100000
+Step "下载语音识别模型 X-ASR（sherpa-onnx int8 版，约 175MB；国内下载慢可设置 `$env:HF_ENDPOINT = 'https://hf-mirror.com'）"
+Download "$XasrUrl/encoder-epoch-99-avg-1.int8.onnx" (Join-Path $XasrDir "encoder-epoch-99-avg-1.int8.onnx") 150000000
+Download "$XasrUrl/decoder-epoch-99-avg-1.onnx" (Join-Path $XasrDir "decoder-epoch-99-avg-1.onnx") 10000000
+Download "$XasrUrl/joiner-epoch-99-avg-1.int8.onnx" (Join-Path $XasrDir "joiner-epoch-99-avg-1.int8.onnx") 2000000
+Download "$XasrUrl/tokens.txt" (Join-Path $XasrDir "tokens.txt") 50000
+Download "$XasrUrl/bpe.model" (Join-Path $XasrDir "bpe.model") 100000
 
 # ---------- 7. 配置文件 ----------
 Step "生成配置文件"
@@ -108,12 +113,15 @@ else {
     Info "已生成：$Config"
 }
 
-# 旧配置里语音识别是 FunASR 时（本项目不再安装它），切换到 SherpaASR（同一个 SenseVoice 模型）
+# 旧配置里语音识别是 FunASR 或 SenseVoice 时，询问是否切换到默认的 X-ASR（中英混合更准，速度一样）
 Push-Location $Server
-$asrType = & $Py -c "from core.admin import config_store; print(config_store.entry_type(config_store.load_merged(), 'ASR'))" 2>$null
-if ($asrType -eq "fun_local" -and (Ask "当前配置的语音识别是 FunASR，本项目不再安装它。切换到 SherpaASR（同一个 SenseVoice 模型）？" "Y")) {
-    & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaASR', config_store.load_merged())" 2>$null
-    if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaASR" } else { Info "切换失败，请手动把 data\.config.yaml 里的 selected_module.ASR 改成 SherpaASR" }
+$asrNow = & $Py -c "from core.admin import config_store; m = config_store.load_merged(); print(m['selected_module']['ASR'], config_store.entry_type(m, 'ASR'))" 2>$null
+if ($asrNow) {
+    $asrName, $asrType = $asrNow -split " ", 2
+    if (($asrType -eq "fun_local" -or $asrName -eq "SherpaASR") -and (Ask "当前的语音识别是 $asrName。切换到 X-ASR（中英混合识别更准，速度一样）？" "Y")) {
+        & $Py -c "from core.admin import config_store; config_store.select_entry('ASR', 'SherpaXASR', config_store.load_merged())" 2>$null
+        if ($LASTEXITCODE -eq 0) { Info "语音识别已切换为 SherpaXASR" } else { Info "切换失败，请手动把 data\.config.yaml 里的 selected_module.ASR 改成 SherpaXASR" }
+    }
 }
 Pop-Location
 

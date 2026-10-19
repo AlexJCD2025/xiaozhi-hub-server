@@ -39,7 +39,7 @@ A **local hub server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and
   - Conversation resume: picks up automatically after a reconnect, and you can say "接着上次聊" ("continue where we left off") to resume an earlier conversation. → [design.md §6](hub-docs/design.md#6-会话接续只对-claude-code)
 - **Other LLMs too**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
 - **Switch models by name**: after waking the device, say "嗨 + a name" (e.g. "Hey Claude", "Hey DeepSeek") to hand the conversation to that model. Each device remembers the model it used last, and each model only remembers its own conversations. Names can be recorded in the admin console by speaking to the device, so they match your pronunciation. → [design.md §5](hub-docs/design.md#5-呼名与多模型路由)
-- **Local speech recognition**: the recognition model runs on your machine, no internet needed. Speech synthesis uses EdgeTTS with a choice of voices.
+- **Local speech recognition**: the X-ASR Chinese-English model runs on your machine, no internet needed, and handles mixed sentences like "帮我跑一下 npm install". Speech synthesis uses EdgeTTS with a choice of voices.
 - **Web admin console**:
   - Set up LLMs and API keys; choose the model, thinking level and permission level for Claude Code.
   - Give each model a name to call it by: add it by hand, or say it to the device a few times to record it.
