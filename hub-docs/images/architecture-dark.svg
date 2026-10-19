@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1110" height="800" viewBox="0 0 1110 800" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif">
+<defs><marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#94a3b8"/></marker><marker id="as" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0L0 5L10 10z" fill="#94a3b8"/></marker></defs>
+<rect width="1110" height="800" fill="#0d1117"/>
+<rect x="210" y="16" width="726" height="768" rx="16" fill="#11161d" stroke="#30363d" stroke-width="1.5"/>
+<text x="230" y="44" font-size="14" font-weight="600" fill="#94a3b8">你的电脑</text>
+<rect x="250" y="60" width="416" height="708" rx="14" fill="#1e1b4b" stroke="#4f46e5" stroke-width="1.5"/>
+<text x="268" y="88" font-size="15" font-weight="700" fill="#e2e8f0">xiaozhi-hub-server</text>
+<text x="418" y="88" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">main/xiaozhi-server</text>
+<rect x="345.0" y="108" width="250" height="58" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="470.0" y="132.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">WebSocket 连接</text>
+<text x="470.0" y="152.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/connection.py</text>
+<rect x="345.0" y="196" width="250" height="58" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="470.0" y="220.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">语音检测、语音识别</text>
+<text x="470.0" y="240.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/providers/vad、asr</text>
+<rect x="345.0" y="284" width="250" height="58" rx="10" fill="#161b22" stroke="#818cf8" stroke-width="2.5"/>
+<text x="470.0" y="308.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">热词、纠错</text>
+<text x="470.0" y="328.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/agent/asr_text.py</text>
+<rect x="345.0" y="372" width="250" height="58" rx="10" fill="#161b22" stroke="#818cf8" stroke-width="2.5"/>
+<text x="470.0" y="396.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">呼名</text>
+<text x="470.0" y="416.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/agent/call_names.py</text>
+<rect x="345.0" y="460" width="250" height="58" rx="10" fill="#161b22" stroke="#818cf8" stroke-width="2.5"/>
+<text x="470.0" y="484.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">多模型路由</text>
+<text x="470.0" y="504.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/agent/llm_router.py</text>
+<path d="M470 166 V196" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M470 254 V284" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M470 342 V372" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M470 430 V460" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<rect x="280" y="560" width="170" height="78" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="365.0" y="584.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">API 模型</text>
+<text x="365.0" y="604.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">llm/openai 等</text>
+<text x="365.0" y="624.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">对话记录在连接内存</text>
+<rect x="476" y="560" width="170" height="78" rx="10" fill="#161b22" stroke="#818cf8" stroke-width="2.5"/>
+<text x="561.0" y="584.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">Claude Code 会话</text>
+<text x="561.0" y="604.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">claude_session.py</text>
+<text x="561.0" y="624.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">每轮只发这一句</text>
+<path d="M430 518 V532 H365.0 V560" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M510 518 V532 H561.0 V560" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<rect x="345.0" y="680" width="250" height="58" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="470.0" y="704.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">表情、语音合成</text>
+<text x="470.0" y="724.0" text-anchor="middle" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#94a3b8">core/providers/tts</text>
+<path d="M365.0 638 V658 H430 V680" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M561.0 638 V658 H510 V680" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<path d="M345.0 709.0 H266 V150 H345.0" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<text x="258" y="430" text-anchor="middle" font-size="12.5" fill="#94a3b8" transform="rotate(-90 258 430)">语音经同一条连接发回设备</text>
+<rect x="16" y="104" width="140" height="62" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="86.0" y="130.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">小智设备</text>
+<text x="86.0" y="150.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">StackChan 等</text>
+<path d="M156 126 H345.0" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-start="url(#as)" marker-end="url(#ae)"/>
+<text x="206" y="118" text-anchor="middle" font-size="12.5" fill="#94a3b8">WebSocket</text>
+<text x="206" y="145" text-anchor="middle" font-size="12.5" fill="#94a3b8">长连接</text>
+<rect x="16" y="568" width="140" height="62" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="86.0" y="594.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">模型厂商 API</text>
+<text x="86.0" y="614.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">DeepSeek、通义千问…</text>
+<path d="M280 599 H156" fill="none" stroke="#1e1b4b" stroke-width="9"/>
+<path d="M280 599 H156" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<text x="204" y="590" text-anchor="middle" font-size="12.5" fill="#94a3b8">每句话一次</text>
+<text x="204" y="626" text-anchor="middle" font-size="12.5" fill="#94a3b8">HTTP 请求</text>
+<path d="M724 109 a95.0 9 0 0 0 190 0 v66 a95.0 9 0 0 1 -190 0 z" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<ellipse cx="819.0" cy="109" rx="95.0" ry="9" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<text x="819.0" y="142.5" text-anchor="middle" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#e2e8f0">data/.config.yaml</text>
+<text x="819.0" y="160.5" text-anchor="middle" font-size="12.5" fill="#94a3b8">管理后台改的所有设置</text>
+<path d="M595.0 137 H666" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M666 137 H724" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="689.5" y="128" text-anchor="middle" font-size="12.5" fill="#94a3b8">读设置</text>
+<path d="M724 449 a95.0 9 0 0 0 190 0 v66 a95.0 9 0 0 1 -190 0 z" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<ellipse cx="819.0" cy="449" rx="95.0" ry="9" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<text x="819.0" y="473.5" text-anchor="middle" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#e2e8f0">data/agent_sessions.json</text>
+<text x="819.0" y="491.5" text-anchor="middle" font-size="12.5" fill="#94a3b8">上次用的模型</text>
+<text x="819.0" y="509.5" text-anchor="middle" font-size="12.5" fill="#94a3b8">Claude Code 会话 ID</text>
+<path d="M595.0 489 H724" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<rect x="724" y="568" width="190" height="62" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="819.0" y="594.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">Claude Code 进程</text>
+<text x="819.0" y="614.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">本机常驻，按需启动</text>
+<path d="M646 599 H724" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-start="url(#as)" marker-end="url(#ae)"/>
+<text x="689.0" y="588" text-anchor="middle" font-size="12.5" fill="#94a3b8">输入输出</text>
+<path d="M724 677 a95.0 9 0 0 0 190 0 v66 a95.0 9 0 0 1 -190 0 z" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<ellipse cx="819.0" cy="677" rx="95.0" ry="9" fill="#083344" stroke="#0e7490" stroke-width="1.5"/>
+<text x="819.0" y="701.5" text-anchor="middle" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#e2e8f0">~/.claude</text>
+<text x="819.0" y="719.5" text-anchor="middle" font-size="12.5" fill="#94a3b8">Claude Code 的会话</text>
+<text x="819.0" y="737.5" text-anchor="middle" font-size="12.5" fill="#94a3b8">对话内容存在这里</text>
+<path d="M819.0 630 V668" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M628 560 L754 520" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<rect x="966" y="568" width="128" height="62" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="1030.0" y="594.0" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0">Anthropic</text>
+<text x="1030.0" y="614.0" text-anchor="middle" font-size="12.5" fill="#94a3b8">云端</text>
+<path d="M914 599 H966" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ae)"/>
+<rect x="966" y="108" width="26" height="16" rx="4" fill="#161b22" stroke="#818cf8" stroke-width="2.5"/>
+<text x="1000" y="121" font-size="12.5" fill="#94a3b8">本项目新增</text>
+<line x1="966" y1="148" x2="992" y2="148" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="1000" y="153" font-size="12.5" fill="#94a3b8">读写存储</text>
+</svg>
