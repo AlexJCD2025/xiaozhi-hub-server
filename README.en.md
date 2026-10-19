@@ -37,7 +37,7 @@ listens, speaks      recognizes, routes, synthesizes            thinks and does 
 ## What it does
 
 - **Direct Claude Code by voice**: for example "list the files in my working directory" or "turn this week's notes into a checklist". It works with the account you signed in to on this computer; for tasks that take a few minutes, the device waits with you and reports the result when it's done.
-- **Switch between LLMs**: say "嗨 Claude" or "嗨 DeepSeek" ("Hey Claude" / "Hey DeepSeek") to hand the conversation to that model. Each device remembers the one it used last. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
+- **Switch between LLMs**: say "嗨 Claude" ("Hey Claude") to hand the conversation to the local Claude Code; after giving other models a call name in the admin console, say something like "嗨 DeepSeek" to switch to that model. Each device remembers the one it used last. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
 - **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
 - **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
 - **Mixed Chinese and English**: the default X-ASR speech recognition runs on your machine without internet and gets sentences like "帮我跑一下 npm install" right; Doubao streaming ASR is also available.
