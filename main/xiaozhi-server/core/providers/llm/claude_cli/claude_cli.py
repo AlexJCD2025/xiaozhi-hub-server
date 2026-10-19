@@ -374,6 +374,10 @@ class LLMProvider(LLMProviderBase):
                     self.store.touch(st.key, st.agent.session_id)
             except AgentSessionError as e:
                 out.put(Error(e.kind, e.detail))
+            except asyncio.CancelledError:
+                # Claude Code 卡死被强制关闭（_abandon_if_stuck 取消了这一轮）：告诉还在等的一方这一轮结束了
+                out.put(Done(interrupted=True))
+                raise
             except Exception as e:
                 logger.bind(tag=TAG).exception(f"Claude Code 处理出错: {e}")
                 out.put(Error(ErrorKind.UNKNOWN, str(e)))
@@ -405,6 +409,13 @@ class LLMProvider(LLMProviderBase):
         finished = False
         try:
             while True:
+                if self._aborted(st):
+                    # 设备打断了（abort() 已经让 Claude 中断）：这一轮到此为止，不再保活、不再说进度。
+                    # 不能等 Claude 自己结束：它卡住不理中断时，这里会一直等到单轮超时（最长 10 分钟），
+                    # 期间连接一直不会因为没人说话断开；用户开口说下一句后，打断标志被清掉，
+                    # 这里还会接着吐出"还在处理""做得太久"
+                    finished = True
+                    return
                 try:
                     ev = out.get(timeout=0.2)
                 except queue.Empty:
@@ -471,6 +482,11 @@ class LLMProvider(LLMProviderBase):
             if not finished and st.agent:
                 # 生成器被提前关闭（例如设备打断后服务端停止迭代），让 Claude 也停下来
                 asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
+
+    @staticmethod
+    def _aborted(st: ConnState) -> bool:
+        """设备是否打断了这一轮。打断时服务端会把连接的 client_abort 置为 True，新的一句话开始时清掉。"""
+        return bool(getattr(st.conn, "client_abort", False))
 
     @staticmethod
     def _keep_alive(st: ConnState) -> None:
