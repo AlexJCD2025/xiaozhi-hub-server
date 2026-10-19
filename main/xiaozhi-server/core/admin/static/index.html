@@ -430,11 +430,12 @@ function setOnline(devices) {
   $("online-text").textContent = devices.length ? `${devices.length} 台设备在线` : "没有设备在线";
 }
 
-// 侧边栏的在线设备数不管在哪一页都要跟着变：登录后每 5 秒查一次（页面在后台时跳过）
+// 侧边栏的在线设备数不管在哪一页都要跟着变：登录后每 5 秒查一次。
+// 页面在后台时跳过；状态页自己会查（顺带刷新设备列表），这里也跳过，免得重复请求
 let onlineTimer = null;
 function watchOnline() {
   const refresh = async () => {
-    if (document.hidden) return;
+    if (document.hidden || page.name === "status") return;
     try { setOnline((await api("devices")).devices); } catch (e) {}
   };
   clearInterval(onlineTimer);
@@ -487,13 +488,20 @@ async function renderStatus(root) {
   root.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
   $("refresh").onclick = (e) => busy(e.target, () => openPage("status", true));
   renderDevices(dev);
+  // 平时每 5 秒查一次；有设备在做表情测试时每 1.5 秒查一次，让进度跟上设备屏幕
+  let last = Date.now();
   page.timer = setInterval(async () => {
+    const testing = (lastDevices?.devices || []).some((d) => d.emotion_test && d.emotion_test.running);
+    if (document.hidden || (!testing && Date.now() - last < 5000)) return;
+    last = Date.now();
     try { const d = await api("devices"); setOnline(d.devices); renderDevices(d); } catch (e) {}
   }, 1500);
 }
 
 const openEmotion = new Set();  // 展开了表情测试的设备
+let lastDevices = null;  // 最近一次查到的在线设备，状态页据此决定多久再查
 function renderDevices(dev) {
+  lastDevices = dev;
   const box = $("devices");
   if (!box) return;
   if (!dev.devices.length) {
