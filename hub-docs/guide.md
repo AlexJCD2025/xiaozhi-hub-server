@@ -23,9 +23,11 @@ xiaozhi-hub-server 是小智设备（M5Stack StackChan、ESP32 开发板等）�
 
 需要：
 
-- macOS 或 Linux（Windows 脚本 `scripts/install.ps1`、`scripts/start.ps1` 还没有实测）；
+- macOS、Linux 或 Windows 10/11；
 - 能访问网络；
-- 已安装 git（macOS 没有时运行 `xcode-select --install`）。
+- 已安装 git（macOS 没有时运行 `xcode-select --install`；Windows 没有时在 PowerShell 里运行 `winget install --id Git.Git -e`）。
+
+下面是 macOS / Linux 的步骤，Windows 见本节最后的 [Windows 安装](#windows-安装)。
 
 **一键安装**：在终端运行下面这一行。代码会下载到 `~/xiaozhi-hub-server`，然后自动安装；安装结束时会询问是否开机自启，直接回车就是开启（见 [§7](#7-开机自启更新与卸载)）。
 
@@ -47,6 +49,23 @@ bash scripts/start.sh     # 启动（没有开启开机自启时）
 一共下载约 370MB，装好后占用约 800MB 硬盘，运行时内存约 0.6GB。国内网络慢的话，先看 [§8 安装细节](#8-安装细节) 里的镜像设置。
 
 安装结束和每次启动时都会运行自检，并显示管理后台和 OTA 的地址。
+
+### Windows 安装
+
+在 PowerShell 里运行：
+
+```powershell
+git clone --depth 1 https://github.com/justhalfbit/xiaozhi-hub-server.git
+cd xiaozhi-hub-server
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # 安装
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # 启动
+```
+
+- 安装脚本做的事和 macOS / Linux 一样：uv、Python 3.10、依赖、语音识别模型、配置文件。ffmpeg 用 winget 安装（`Gyan.FFmpeg`）；缺 opus 时自动下载 `opus.dll` 放进虚拟环境（见 [§8](#8-安装细节)）。
+- 第一次启动时，Windows 防火墙会询问是否允许 Python 访问网络，请勾选"专用网络"并允许，否则设备连不上。
+- Windows 目前没有开机自启，每次开机后运行一次 `start.ps1`。
+- 更新：在项目目录里运行 `git pull`，再运行一次 `install.ps1` 补装新增的依赖。
+- 卸载：`powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。
 
 ## 2. 首次配置
 
@@ -152,7 +171,7 @@ http://<电脑的局域网 IP>:16688/xiaozhi/ota/
 
 ### 开机自启
 
-安装结束时会询问是否开机自启，默认开启（直接回车）；非交互安装（`ASSUME_YES=1` 或没有终端）也会开启。开启后，服务在后台运行，不用开着终端；异常退出时 30 秒后自动重启。以后也可以随时开关：
+macOS 和 Linux 安装结束时会询问是否开机自启，默认开启（直接回车）；Windows 目前没有开机自启。非交互安装（`ASSUME_YES=1` 或没有终端）也会开启。开启后，服务在后台运行，不用开着终端；异常退出时 30 秒后自动重启。以后也可以随时开关：
 
 ```bash
 bash scripts/autostart.sh enable    # 开启，并马上在后台启动
@@ -189,7 +208,7 @@ bash ~/xiaozhi-hub-server/scripts/update.sh
 bash ~/xiaozhi-hub-server/scripts/uninstall.sh
 ```
 
-Windows 用 `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`（未实测）。卸载脚本会先列出要删的内容，回答 `y` 才执行：
+Windows 用 `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`。卸载脚本会先列出要删的内容，回答 `y` 才执行：
 
 1. 取消开机自启，停止后台服务（macOS 删掉 LaunchAgent，Linux 删掉 systemd 用户服务）；
 2. 删除整个安装目录，包括虚拟环境、语音识别模型、配置文件和里面的 API Key；

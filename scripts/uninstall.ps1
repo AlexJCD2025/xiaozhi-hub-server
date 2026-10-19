@@ -1,5 +1,4 @@
 ﻿# xiaozhi-hub-server 卸载（Windows PowerShell）
-# ⚠️ 未实测：尚未在 Windows 上运行验证。
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
 #   删除整个安装目录（代码、虚拟环境、语音识别模型、配置和 API Key），询问是否删除工作目录 %USERPROFILE%\xiaozhi-workspace（默认保留）。
 #   Windows 目前没有开机自启，不需要取消。uv、Python 3.10、ffmpeg、Claude Code 可能被别的程序共用，不删。
