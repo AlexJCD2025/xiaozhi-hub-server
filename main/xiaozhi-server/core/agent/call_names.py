@@ -23,6 +23,9 @@ TAG = __name__
 
 DEFAULT_MODELS = {"ClaudeCLI": ["claude", "cloud", "clod", "clot", "克劳德"]}
 DEFAULT_REPLY = "我在"
+# 发缓存的音频前等一会儿：设备收到 tts start 后要先切到说话状态（会清空解码队列），切换完成前收到的音频会被丢掉。
+# 正常合成时中间有约 2 秒的合成时间，不会碰到；缓存的音频紧跟着就到，不等的话设备只显示文字、没有声音
+CACHED_REPLY_DELAY = 0.3
 
 
 def one_segment(text: str) -> str:
@@ -178,6 +181,7 @@ async def _speak(conn: "ConnectionHandler", heard: str, reply: str, cache: bool 
     packets = _audio_cache.get(_cache_key(conn, reply)) if cache else None
     if packets:
         # 和唤醒词回复的播放方式一样
+        await asyncio.sleep(CACHED_REPLY_DELAY)
         await sendAudioMessage(conn, SentenceType.FIRST, packets, reply)
         await sendAudioMessage(conn, SentenceType.LAST, [], None)
         conn.dialogue.put(Message(role="assistant", content=reply))
