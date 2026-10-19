@@ -25,7 +25,7 @@ LLM:
     cli_path: ""                    # 留空自动查找
     model: haiku                    # 留空使用 Claude Code 默认模型
     effort: low                     # 思考力度：low 更快、high 更准；留空使用 Claude Code 默认值
-    workdir: ~/xiaozhi-workspace    # Claude Code 只能访问这个目录
+    workdir: ~/xiaozhi-workspace    # 读写文件只能在这个目录里；开启执行命令（Auto）后，命令不受这个限制
     allowed_tools: [Read, Grep, Glob]   # 默认只读；放开 Bash/Write 等需谨慎
     permission_mode: default
     turn_timeout_seconds: 600       # 一个任务最长做多久；干活期间设备陪着等，连接不会断开

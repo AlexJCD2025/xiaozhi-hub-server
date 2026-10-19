@@ -135,6 +135,14 @@ def _check_positive_number(name: str, raw) -> None:
         raise ValueError(f"{name} 需要是大于 0 的数字")
 
 
+def _check_non_negative_number(name: str, raw) -> None:
+    try:
+        if float(str(raw).strip()) < 0:
+            raise ValueError
+    except ValueError:
+        raise ValueError(f"{name} 需要是 0 或正数")
+
+
 def save_claude_cli(payload: dict, merged: dict, path: Path = None) -> list:
     """校验后写入 ClaudeCLI 条目，返回实际修改的字段。"""
     entry = _entry(merged, "LLM", CLAUDE_CLI_ENTRY)
@@ -173,10 +181,13 @@ def save_claude_cli(payload: dict, merged: dict, path: Path = None) -> list:
         if bad:
             raise ValueError(f"工具名不对：{', '.join(bad)}")
         payload["allowed_tools"] = items
-    for name in ("turn_timeout_seconds", "stall_timeout_seconds", "idle_timeout_seconds",
-                 "resume_window_minutes", "filler_delay_seconds"):
+    # 这几项填 0 有特别含义（见 claude_cli.py）：单轮、无响应超时 0 是不限制，空闲关闭 0 是每轮结束就关进程，
+    # 自动接续 0 是不自动接续
+    for name in ("turn_timeout_seconds", "stall_timeout_seconds", "idle_timeout_seconds", "resume_window_minutes"):
         if name in payload:
-            _check_positive_number(name, payload[name])
+            _check_non_negative_number(name, payload[name])
+    if "filler_delay_seconds" in payload:
+        _check_positive_number("filler_delay_seconds", payload["filler_delay_seconds"])
     raw = str(payload.get("progress_interval_seconds", "")).strip()
     if raw:  # 留空表示用默认值，0 表示关闭进度提示
         try:

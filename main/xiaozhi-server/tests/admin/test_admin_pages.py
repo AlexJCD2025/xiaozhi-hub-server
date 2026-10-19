@@ -98,8 +98,13 @@ def test_save_claude_cli_validates_choices(cfg_path):
         pages.save_claude_cli({"allowed_tools": ["Read", "rm -rf"]}, merged(cfg_path), cfg_path)
     with pytest.raises(ValueError, match="工作目录"):
         pages.save_claude_cli({"workdir": " "}, merged(cfg_path), cfg_path)
-    with pytest.raises(ValueError, match="大于 0"):
+    with pytest.raises(ValueError, match="0 或正数"):
         pages.save_claude_cli({"turn_timeout_seconds": "-1"}, merged(cfg_path), cfg_path)
+    with pytest.raises(ValueError, match="大于 0"):
+        pages.save_claude_cli({"filler_delay_seconds": "0"}, merged(cfg_path), cfg_path)
+    # 超时、空闲关闭、自动接续填 0 有特别含义（不限制 / 每轮关闭 / 不自动接续），要能保存
+    assert pages.save_claude_cli({"turn_timeout_seconds": "0"}, merged(cfg_path), cfg_path) == ["turn_timeout_seconds"]
+    assert merged(cfg_path)["LLM"]["ClaudeCLI"]["turn_timeout_seconds"] == 0
     changed = pages.save_claude_cli({"effort": "medium", "allowed_tools": ["Read", "WebSearch"], "model": "sonnet"},
                                     merged(cfg_path), cfg_path)
     entry = merged(cfg_path)["LLM"]["ClaudeCLI"]
