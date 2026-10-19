@@ -65,7 +65,8 @@ after_pull() {
 
   if [[ -n "$old" ]] && git cat-file -e "${old}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$old" HEAD 2>/dev/null; then
     info "更新内容："
-    git log --format='      %h %s' "$old..HEAD" | head -20
+    # 用 -20 而不是 | head：开着 pipefail 时 head 提前退出会让 git 收到 SIGPIPE，整个脚本跟着退出
+    git log -20 --format='      %h %s' "$old..HEAD"
   else
     # 浅克隆只有最新一次提交，列不出中间的改动，给出 GitHub 上的对比页
     info "已更新到：$(git log -1 --format='%h %s（%cd）' --date=short)"
