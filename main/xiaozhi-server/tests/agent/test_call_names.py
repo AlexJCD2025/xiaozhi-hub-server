@@ -189,9 +189,14 @@ async def test_only_call_name_reply_audio_is_cached(spoken, monkeypatch):
     import core.handle.sendAudioHandle as send_mod
 
     sent = []
+    real_sleep = asyncio.sleep
 
     async def fake_send_audio(conn, sentence_type, audios, text, sentence_id=None):
         sent.append((sentence_type.name, audios, text))
+
+    async def record_sleep(delay, *args, **kwargs):
+        sent.append(("sleep", delay))
+        await real_sleep(0)
 
     monkeypatch.setattr(send_mod, "sendAudioMessage", fake_send_audio)
     monkeypatch.setattr(call_names, "_audio_cache", {})
@@ -203,7 +208,10 @@ async def test_only_call_name_reply_audio_is_cached(spoken, monkeypatch):
     assert spoken["tts"] == [call_names.DEFAULT_REPLY] and sent == []  # 第一次走正常合成
     # 等后台缓存任务结束（测试环境的 asyncio.sleep 不真正等待）
     await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
     assert await handle_call_name(c, "嗨 cloud") is None
     assert spoken["tts"] == [call_names.DEFAULT_REPLY]  # 第二次不再合成
-    assert sent == [("FIRST", [b"opus-" + call_names.DEFAULT_REPLY.encode()], call_names.DEFAULT_REPLY),
+    # 先等设备切到说话状态再发音频，否则音频会被设备丢掉
+    assert sent == [("sleep", call_names.CACHED_REPLY_DELAY),
+                    ("FIRST", [b"opus-" + call_names.DEFAULT_REPLY.encode()], call_names.DEFAULT_REPLY),
                     ("LAST", [], None)]
