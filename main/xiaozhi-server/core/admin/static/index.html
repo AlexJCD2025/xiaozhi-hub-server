@@ -133,6 +133,7 @@
 
   /* 选择卡片 */
   .choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .choices.three { grid-template-columns: repeat(3, 1fr); }
   .choice { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: flex; gap: 14px;
             text-align: left; box-shadow: var(--shadow); }
   button.choice { cursor: pointer; }
@@ -267,7 +268,7 @@
     #online-short { display: inline; }
     .side-foot .dot { margin-right: 4px; }
     main { padding: 20px 16px 56px; }
-    .choices, .grid2, .grid3, .plugins, .tips, .levels { grid-template-columns: 1fr; }
+    .choices, .choices.three, .grid2, .grid3, .plugins, .tips, .levels { grid-template-columns: 1fr; }
     .cli-row { grid-template-columns: 1fr; gap: 6px; } .cli-k { padding-top: 0; }
     .flow { flex-direction: column; overflow: visible; }
     .arrow { transform: rotate(90deg); }
@@ -654,7 +655,7 @@ async function renderLLM(root) {
     ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里选的是 ${esc(d.selected)}，但服务仍在使用 ${esc(d.running)}。</div>` : ""}
 
     <div class="section-title">本地 CLI · 使用本机已登录的账号，不需要 Key</div>
-    <div class="choices">
+    <div class="choices three">
       <div class="choice ${usingCli ? "on" : ""}">
         <div class="mark" style="background:#fef3c7;color:#b45309">C</div>
         <div><b>Claude Code CLI</b> ${usingCli ? '<span class="pill ok">使用中</span>' : ""}
@@ -663,6 +664,10 @@ async function renderLLM(root) {
       <div class="choice off" title="即将支持">
         <div class="mark" style="background:var(--soft);color:var(--muted)">X</div>
         <div><b>Codex CLI</b> <span class="pill">即将支持</span><small>OpenAI 的本地编程助手</small></div>
+      </div>
+      <div class="choice off" title="即将支持">
+        <div class="mark" style="background:var(--soft);color:var(--muted)">G</div>
+        <div><b>Grok Bot</b> <span class="pill">即将支持</span><small>xAI 的云端 AI 同事，派活后把结果念给你听</small></div>
       </div>
     </div>
     <div class="card panel" id="cli-form">
