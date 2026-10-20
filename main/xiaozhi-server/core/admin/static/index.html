@@ -285,14 +285,9 @@
     <input type="text" name="username" value="admin" autocomplete="username" class="hidden" tabindex="-1">
     <div id="auth-setup" class="hidden">
       <h2>设置管理后台密码</h2>
-      <p class="muted small">首次使用请设置访问密码（至少 6 位）。设置后，局域网内的其他设备也可以凭密码登录。</p>
+      <p class="muted small">首次使用请设置访问密码（至少 6 位）。设置后，用这个密码登录。</p>
       <label class="f">密码<input class="in" id="setup-pw" type="password" autocomplete="new-password"></label>
       <label class="f" style="margin-top:12px">再次输入<input class="in" id="setup-pw2" type="password" autocomplete="new-password"></label>
-    </div>
-    <div id="auth-remote" class="hidden">
-      <h2>尚未设置密码</h2>
-      <p class="muted small">为了安全，首次设置密码只能在运行服务的电脑上进行。请在那台电脑的浏览器中打开
-        <code id="local-admin-url"></code>。</p>
     </div>
     <div id="auth-login" class="hidden">
       <h2>登录</h2>
@@ -378,17 +373,15 @@ async function route() {
   let st;
   try { st = await (await fetch("/admin/api/state")).json(); } catch (e) { return; }
   if (st.needs_setup || !st.logged_in) {
-    authMode = st.needs_setup ? (st.is_local ? "setup" : "remote") : "login";
+    authMode = st.needs_setup ? "setup" : "login";
     clearInterval(page.timer); page.name = "";
     clearInterval(onlineTimer); onlineTimer = null;
     $("app").classList.add("hidden"); $("auth").classList.remove("hidden");
     $("auth-setup").classList.toggle("hidden", authMode !== "setup");
-    $("auth-remote").classList.toggle("hidden", authMode !== "remote");
     $("auth-login").classList.toggle("hidden", authMode !== "login");
-    $("auth-btn").classList.toggle("hidden", authMode === "remote");
     $("auth-btn").textContent = authMode === "setup" ? "设置并进入" : "登录";
     $("auth-error").classList.add("hidden");
-    if (authMode !== "remote") $(authMode === "setup" ? "setup-pw" : "login-pw").focus();
+    $(authMode === "setup" ? "setup-pw" : "login-pw").focus();
     return;
   }
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden");
@@ -415,7 +408,6 @@ $("auth-form").addEventListener("submit", async (ev) => {
   });
 });
 $("logout").onclick = async () => { if (!confirmLeave()) return; page.dirty = null; await api("logout", {}); await route(); };
-$("local-admin-url").textContent = `http://127.0.0.1:${location.port || 80}/admin`;
 
 const PAGES = { status: renderStatus, how: renderHow, llm: renderLLM, calls: renderCallNames, asr: renderASR, tts: renderTTS, intent: renderIntent };
 const page = { name: "", dirty: null, timer: null };
