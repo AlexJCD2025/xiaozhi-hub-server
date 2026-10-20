@@ -67,6 +67,25 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1     # 启动
 - 更新：在项目目录里运行 `git pull`，再运行一次 `install.ps1` 补装新增的依赖。
 - 卸载：先运行 `cd ~` 离开项目目录（Windows 删不掉正在使用的目录），再运行 `powershell -ExecutionPolicy Bypass -File xiaozhi-hub-server\scripts\uninstall.ps1`（项目不在用户目录下的，换成实际路径）。
 
+### 部署到云端服务器
+
+Linux 服务器的安装方法和上面一样。云服务器上一般没有 Claude Code，安装脚本会改用 Claude API，到管理后台填 API Key 就行（也可以换成别的厂商）。装好后还要做这几步：
+
+1. **放行端口**：在云服务器的安全组或防火墙里放行 `16688`（OTA 接口和管理后台）和 `16689`（设备的语音连接），两个都要开。设备每次开机都会先访问 OTA 接口，所以 `16688` 不能只对自己的 IP 开放。
+2. **写明公网地址**：编辑 `main/xiaozhi-server/data/.config.yaml`，在已有的 `server:` 下面加一行 `websocket`：
+
+   ```yaml
+   server:
+     websocket: ws://<服务器的公网 IP 或域名>:16689/xiaozhi/v1/
+   ```
+
+   设备会从 OTA 接口拿到这个地址再去连接。不写的话，下发的是服务器自己检测到的 IP，云服务器上通常是内网 IP，设备连不上。改完重启服务（开了开机自启的，运行 `bash scripts/autostart.sh restart`）。
+3. **设置管理密码**：服务启动后，尽快在浏览器里打开 `http://<公网 IP>:16688/admin` 设置管理密码。在你设置之前，谁先打开后台谁就能设置。
+4. **连接设备**：配网时 OTA 地址填 `http://<公网 IP>:16688/xiaozhi/ota/`。
+
+- 想让服务器开机就启动、不用登录，运行 `sudo loginctl enable-linger $USER`，见 [§7](#7-开机自启更新与卸载)。
+- 管理后台走的是 HTTP，登录时密码是明文传输的。
+
 ## 2. 首次配置
 
 1. **设置管理密码**：用浏览器打开管理后台，第一次打开时设置管理密码（至少 6 位）。在运行服务的这台电脑上打开 `http://127.0.0.1:16688/admin`，其他电脑用 `http://<服务所在电脑的 IP>:16688/admin`。
