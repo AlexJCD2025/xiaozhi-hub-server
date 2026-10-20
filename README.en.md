@@ -109,7 +109,7 @@ If you cloned manually, replace `~/xiaozhi-hub-server` with your own directory. 
 ## Security
 
 - On your own computer, use the server only on your LAN. Do not expose its ports to the internet.
-- On a cloud server, the device connection and the admin console are on the internet: restrict access with a firewall and use a strong admin password. The admin password can only be set for the first time from the server itself; use SSH port forwarding to open the admin console.
+- On a cloud server, the device connection and the admin console are on the internet: restrict access with a firewall, and open the admin console soon after starting the server to set a strong admin password.
 - By default Claude Code can only read files in the working directory `~/xiaozhi-workspace`. Once you allow writing files or running commands in the admin console, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
 
 ## About this repository
