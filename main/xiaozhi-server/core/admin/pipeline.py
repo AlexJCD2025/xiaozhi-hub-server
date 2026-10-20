@@ -167,7 +167,7 @@ def describe_tips(merged: dict) -> list:
     cli = next((llms[n] for n in names if isinstance(llms.get(n), dict) and llms[n].get("type") == "claude_cli"), None)
     has_api = any(isinstance(llms.get(n), dict) and llms[n].get("type") != "claude_cli" for n in names)
 
-    tips = [{"title": "唤醒", "say": "说“Hi, StackChan”，或点一下屏幕",
+    tips = [{"title": "唤醒", "say": "说唤醒词（StackChan 是“Hi, StackChan”），或按一下按键、点一下屏幕",
              "result": "设备开始听你说话。交给这台设备上次用的模型，第一次用时是 "
                        f"{_llm_label(default_name, llms.get(default_name) or {})}"}]
     if calls["enabled"]:
@@ -175,7 +175,7 @@ def describe_tips(merged: dict) -> list:
         tips.append({"title": "换模型", "say": "句首说“嗨 + 称呼”，后面可以直接接内容",
                      "result": f"换成对应的模型回答，之后一直用它；只说称呼时回一声“{calls['reply']}”。"
                                + (f"现在的称呼 —— {aliases}" if aliases else "还没有配置称呼")})
-    tips.append({"title": "打断", "say": "设备说话时，点一下屏幕上的脸",
+    tips.append({"title": "打断", "say": "设备说话时按一下按键（StackChan 是点一下屏幕上的脸），或者喊唤醒词",
                  "result": "马上停下，然后可以说下一句。设备说话时不收音，不能直接插话"})
     if cli:
         progress = _setting(cli, "progress_interval_seconds", 30)
