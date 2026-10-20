@@ -180,12 +180,13 @@ foreach ($f in @((Join-Path $Server "config.yaml"), $Config)) {
 }
 
 # 用的是 API 模型、还没填 Key 时，提醒去后台填
+# 注意：PowerShell 把中文弯引号（“”‘’）当成普通引号，写在字符串里会把字符串截断、整个脚本解析失败，引用文字用「」
 Push-Location $Server
 # Python 只输出模型名（ASCII），中文提示在这里拼，避免控制台编码不同导致乱码
 $NoKey = Quiet { & $Py -c "from core.admin import config_store as c; m = c.load_merged(); n = m['selected_module']['LLM']; e = m['LLM'][n]; print(n if c.entry_type(m, 'LLM') != 'claude_cli' and any(c.is_placeholder(e.get(k)) for k in e if c.SECRET_FIELD.search(k)) else '')" }
 Pop-Location
 $NoKey = ($NoKey | Out-String).Trim()
-$LlmHint = if ($NoKey) { "  大模型 $NoKey 还没填 API Key：打开管理后台的“大模型”页填写后才能对话。" } else { "" }
+$LlmHint = if ($NoKey) { "  大模型 $NoKey 还没填 API Key：打开管理后台的「大模型」页填写后才能对话。" } else { "" }
 
 Write-Host @"
 
