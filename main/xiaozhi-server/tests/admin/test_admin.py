@@ -168,7 +168,7 @@ async def client(cfg_path):
 
 async def test_setup_login_and_update_flow(client, cfg_path):
     st = await (await client.get("/admin/api/state")).json()
-    assert st == {"needs_setup": True, "is_local": True, "logged_in": False}
+    assert st == {"needs_setup": True, "logged_in": False}
 
     r = await client.post("/admin/api/setup", json={"password": "abc12"})
     assert r.status == 400
@@ -196,14 +196,15 @@ async def test_requires_login_and_json(client):
     assert r.status == 415
 
 
-async def test_setup_rejected_from_remote(cfg_path, monkeypatch):
-    monkeypatch.setattr(AdminHandler, "_is_local", staticmethod(lambda request: False))
+async def test_setup_allowed_from_remote(cfg_path, monkeypatch):
+    """首次设置密码不限制来源：部署到云端服务器时，从自己的电脑远程打开后台也能直接设置。"""
+    monkeypatch.setattr(web.BaseRequest, "remote", property(lambda self: "203.0.113.5"))  # 模拟公网上的访问者
     app = web.Application()
     AdminHandler({"selected_module": {}}, config_path=cfg_path).register(app)
     async with TestClient(TestServer(app)) as c:
         r = await c.post("/admin/api/setup", json={"password": "pass-1234"})
-        assert r.status == 403
-    assert config_store.get_password_hash(cfg_path) is None
+        assert r.status == 200
+    assert config_store.get_password_hash(cfg_path)
 
 
 async def test_wrong_password(client):

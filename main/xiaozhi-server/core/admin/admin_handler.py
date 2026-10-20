@@ -1,7 +1,7 @@
 """管理后台的 HTTP 接口。
 
 安全约定：
-- 首次设置密码只允许在本机（127.0.0.1 / ::1）访问时进行，避免局域网里的其他人抢先设置。
+- 首次打开后台时设置密码，从哪台设备访问都可以（部署到云端服务器时也能直接设置）。
 - 登录后用 HttpOnly + SameSite=Strict 的 cookie 保持会话；写操作只接受 JSON 请求。
 - API Key 只写不读：接口永远不返回完整的 Key。
 
@@ -11,7 +11,6 @@
 import asyncio
 import copy
 import functools
-import ipaddress
 import json
 import time
 from pathlib import Path
@@ -96,13 +95,6 @@ class AdminHandler:
         return self._json({"ok": False, "error": message}, status)
 
     @staticmethod
-    def _is_local(request: web.Request) -> bool:
-        try:
-            return ipaddress.ip_address(request.remote or "").is_loopback
-        except ValueError:
-            return False
-
-    @staticmethod
     async def _blocking(func, *args, **kwargs):
         """在线程池里执行同步操作（配置文件读写、密码哈希），不阻塞负责音频下发的主事件循环。"""
         return await asyncio.get_running_loop().run_in_executor(None, functools.partial(func, *args, **kwargs))
@@ -150,7 +142,6 @@ class AdminHandler:
         return self._json(
             {
                 "needs_setup": not config_store.get_password_hash(self.config_path),
-                "is_local": self._is_local(request),
                 "logged_in": self._logged_in(request),
             }
         )
@@ -158,8 +149,6 @@ class AdminHandler:
     async def handle_setup(self, request: web.Request):
         if config_store.get_password_hash(self.config_path):
             return self._error("密码已设置，请直接登录", 409)
-        if not self._is_local(request):
-            return self._error("首次设置密码只能在运行服务的电脑上操作", 403)
         body = await self._read_json(request)
         password = str(body.get("password") or "")
         if len(password) < auth.MIN_PASSWORD_LENGTH:
