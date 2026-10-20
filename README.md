@@ -25,13 +25,13 @@
 
 ---
 
-小智设备（M5Stack StackChan、ESP32 开发板等）的**中枢网关**。设备负责听和说；网关负责识别和合成语音，再按你叫的名字，把话交给对应的 agent 或大模型去干活，需要时还能调用插件和 MCP 工具。
+小智设备（M5Stack StackChan、ESP32 开发板等）的**中枢网关**。设备负责听和说；网关负责识别和合成语音，再按你叫的名字，把话交给对应的 agent 或大模型去干活。
 
 - **部署在自己的电脑上**：可以直接让本机的 Claude Code 干活，也可以用各家大模型的 API。
 - **部署在云端服务器上**：用不了本机的 Claude Code，改用大模型的 API。
 
 ```
-小智设备   ⇄   xiaozhi-hub-server        ⇄   Claude Code / 大模型 API / 插件和 MCP / …
+小智设备   ⇄   xiaozhi-hub-server        ⇄   Claude Code / 大模型 API / …
 听和说          识别、按称呼分派、合成语音       思考和干活
 ```
 
@@ -45,12 +45,6 @@
 - **Claude Code**：用你在本机登录的账号干活，比如"把这周的笔记整理成一份清单"。
 - **大模型 API**：Claude、OpenAI、Gemini、DeepSeek、通义千问、豆包、智谱 GLM、Kimi，以及任意 OpenAI 兼容接口。
 - **更多 agent**：Codex、Grok Bot 在规划中。网关里的 agent 都走同一套会话接口，接入新的 agent 主要就是实现这套接口。
-
-**插件和 MCP**
-
-- **插件**：查天气、听新闻、看时间、放音乐、联网搜索、查 RAGFlow 知识库、控制 Home Assistant 智能家居等。
-- **MCP**：可以接入 MCP 服务器，也能调用设备自己通过 MCP 提供的工具（比如调音量）。
-- 插件和 MCP 在使用大模型 API 时生效；Claude Code 用它自己的工具（读文件、搜索、执行命令等）。
 
 **长任务也能陪着做**
 
