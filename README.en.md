@@ -25,23 +25,36 @@
 
 ---
 
-A **local server** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the server runs on your own computer and hands what you say to the local Claude Code, or to the LLM of your choice.
+A **server gateway** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the gateway recognizes and synthesizes speech and hands what you say to the AI behind it.
+
+- **On your own computer**: let the local Claude Code do the work, or use any LLM API.
+- **On a cloud server**: the local Claude Code is not available, so use LLM APIs instead.
 
 ```
-Xiaozhi device   ⇄   xiaozhi-hub-server on your computer   ⇄   Claude Code / DeepSeek / Qwen / …
-listens, speaks      recognizes, routes, synthesizes            thinks and does the work
+Xiaozhi device   ⇄   xiaozhi-hub-server                ⇄   Claude Code / LLM APIs / …
+listens, speaks      recognizes, routes, synthesizes       thinks and does the work
 ```
 
 > A community project compatible with the Xiaozhi protocol. Not an official Xiaozhi project.
 
 ## Features
 
-- **Direct Claude Code by voice**: it works with the account you signed in to on this computer, for example "turn this week's notes into a checklist". For tasks that take a few minutes, the device waits with you and reports the result when it's done.
-- **Switch models by name**: say "嗨 Claude" ("Hey Claude") to hand over to Claude Code; after giving other models a call name in the admin console, say "嗨 DeepSeek" to switch. Supports Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
+**Who does the work**
+
+- **Claude Code**: works with the account you signed in to on this computer, for example "turn this week's notes into a checklist". For tasks that take a few minutes, the device waits with you and reports the result when it's done.
+- **LLM APIs**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
+- **Planned**: agents such as Codex and Grok Bot.
+
+**Talking to it**
+
+- **Switch models by name**: say "嗨 Claude" ("Hey Claude") to hand over to Claude Code; after giving other models a call name in the admin console, say "嗨 DeepSeek" to switch. Each device remembers the one it used last.
 - **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
 - **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
-- **Mixed Chinese and English**: the default X-ASR runs offline on your machine and gets sentences like "帮我跑一下 npm install" right; Doubao streaming ASR is also available.
-- **Web admin console**: LLMs and API keys, Claude Code permissions, call names, hotwords and corrections, TTS voice, plus online devices and environment checks.
+- **Mixed Chinese and English**: the default X-ASR runs offline and gets sentences like "帮我跑一下 npm install" right, with optional hotwords and corrections; Doubao streaming ASR is also available.
+
+**Admin console**
+
+- Set up LLMs and API keys, Claude Code permissions, call names, hotwords and corrections, and the TTS voice in a web page; see online devices and environment checks.
 
 ## Quick start
 
@@ -95,7 +108,8 @@ If you cloned manually, replace `~/xiaozhi-hub-server` with your own directory. 
 
 ## Security
 
-- Use the server only on your LAN. Do not expose it to the internet.
+- On your own computer, use the server only on your LAN. Do not expose its ports to the internet.
+- On a cloud server, the device connection and the admin console are on the internet: restrict access with a firewall and use a strong admin password. The admin password can only be set for the first time from the server itself; use SSH port forwarding to open the admin console.
 - By default Claude Code can only read files in the working directory `~/xiaozhi-workspace`. Once you allow writing files or running commands in the admin console, voice commands can do the same, so be careful. Commands run at the Auto level are not limited to the working directory.
 
 ## About this repository
