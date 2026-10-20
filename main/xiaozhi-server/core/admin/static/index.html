@@ -133,7 +133,7 @@
 
   /* 选择卡片 */
   .choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-  .choices.three { grid-template-columns: repeat(3, 1fr); }
+  .choices.three { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }  /* 放得下才三列，否则两列 */
   .choice { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: flex; gap: 14px;
             text-align: left; box-shadow: var(--shadow); }
   button.choice { cursor: pointer; }
@@ -654,7 +654,7 @@ async function renderLLM(root) {
     ${d.kind === "other" ? `<div class="banner warn">当前使用的 ${esc(d.selected)} 不在后台管理范围内（可能是手动改了配置文件）。在下面选择一种并点"保存并使用"即可切换。</div>` : ""}
     ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里选的是 ${esc(d.selected)}，但服务仍在使用 ${esc(d.running)}。</div>` : ""}
 
-    <div class="section-title">本地 CLI · 使用本机已登录的账号，不需要 Key</div>
+    <div class="section-title">本地 CLI 与智能体 · 用你自己的账号，不走下面的 API Key</div>
     <div class="choices three">
       <div class="choice ${usingCli ? "on" : ""}">
         <div class="mark" style="background:#fef3c7;color:#b45309">C</div>
