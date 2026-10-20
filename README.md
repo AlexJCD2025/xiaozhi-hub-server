@@ -5,7 +5,7 @@
     <img src="hub-docs/images/logo-light.svg" alt="xiaozhi-hub-server">
   </picture>
 </p>
-<p align="center">让小智设备用语音指挥你电脑上的 Claude Code 和大模型。</p>
+<p align="center">让小智设备成为 AI 的语音中枢：叫谁的名字，就交给谁干活。</p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10-3776ab?style=flat-square" />
@@ -25,36 +25,46 @@
 
 ---
 
-小智设备（M5Stack StackChan、ESP32 开发板等）的**服务端网关**。设备负责听和说；网关负责识别和合成语音，把你说的话交给后面的 AI。
+小智设备（M5Stack StackChan、ESP32 开发板等）的**中枢网关**。设备负责听和说；网关负责识别和合成语音，再按你叫的名字，把话交给对应的 agent 或大模型去干活，需要时还能调用插件和 MCP 工具。
 
 - **部署在自己的电脑上**：可以直接让本机的 Claude Code 干活，也可以用各家大模型的 API。
 - **部署在云端服务器上**：用不了本机的 Claude Code，改用大模型的 API。
 
 ```
-小智设备   ⇄   xiaozhi-hub-server   ⇄   Claude Code / 大模型 API / …
-听和说          识别、换模型、合成语音       思考和干活
+小智设备   ⇄   xiaozhi-hub-server        ⇄   Claude Code / 大模型 API / 插件和 MCP / …
+听和说          识别、按称呼分派、合成语音       思考和干活
 ```
 
 > 兼容小智协议的社区项目，不是小智官方项目。
 
 ## 功能
 
-**能交给谁**
+**一个设备，多个 AI**
 
-- **Claude Code**：用你在本机登录的账号干活，比如"把这周的笔记整理成一份清单"。要做几分钟的任务，设备会陪着等，做完当场说结果。
+- **叫名字换 AI**：说"嗨 Claude"交给 Claude Code，说"嗨 DeepSeek"交给 DeepSeek，称呼在管理后台配。每个 AI 各聊各的，每台设备记得上次用的是哪个。
+- **Claude Code**：用你在本机登录的账号干活，比如"把这周的笔记整理成一份清单"。
 - **大模型 API**：Claude、OpenAI、Gemini、DeepSeek、通义千问、豆包、智谱 GLM、Kimi，以及任意 OpenAI 兼容接口。
-- **规划中**：Codex、Grok Bot 等 Agent。
+- **更多 agent**：Codex、Grok Bot 在规划中。网关里的 agent 都走同一套会话接口，接入新的 agent 主要就是实现这套接口。
 
-**怎么对话**
+**插件和 MCP**
 
-- **叫名字换模型**：说"嗨 Claude"交给 Claude Code；在管理后台给其他模型配好称呼后，说"嗨 DeepSeek"就换过去。每台设备记得上次用的是哪个。
-- **接着上次聊**：断线重连自动接上；隔得久了，说"接着上次聊"也能接回去（Claude Code）。
+- **插件**：查天气、听新闻、看时间、放音乐、联网搜索、查 RAGFlow 知识库、控制 Home Assistant 智能家居等。
+- **MCP**：可以接入 MCP 服务器，也能调用设备自己通过 MCP 提供的工具（比如调音量）。
+- 插件和 MCP 在使用大模型 API 时生效；Claude Code 用它自己的工具（读文件、搜索、执行命令等）。
+
+**长任务也能陪着做**
+
+- **陪着等**：让 Claude Code 做几分钟的任务，设备一直陪着，隔一会儿报一下进度，做完当场说结果。
 - **随时打断**：设备说话时点一下屏幕上的脸，它马上停下。
-- **中英夹杂也能认对**：默认用离线运行的 X-ASR 识别，"帮我跑一下 npm install"也能认准，还可以加热词和纠错表；也可以换成豆包流式识别。
+- **接着上次聊**：断线重连自动接上；隔得久了，说"接着上次聊"也能接回去（Claude Code）。
+
+**听得准**
+
+- 中英夹杂也能认对：默认用离线运行的 X-ASR，"帮我跑一下 npm install"也能认准；认错的词可以加进热词和纠错表。也可以换成豆包流式识别。
 
 **管理后台**
 
-- 在网页上配置大模型和 API Key、Claude Code 的权限、叫模型的称呼、热词纠错和音色，查看在线设备和环境自检。
+- 在网页上配置大模型和 API Key、Claude Code 的权限、称呼、插件、热词纠错和音色，查看在线设备和环境自检。
 
 ## 快速开始
 
