@@ -25,13 +25,13 @@
 
 ---
 
-A **hub gateway** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the gateway recognizes and synthesizes speech, hands what you say to the agent or model whose name you call, and can use plugins and MCP tools along the way.
+A **hub gateway** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the gateway recognizes and synthesizes speech and hands what you say to the agent or model whose name you call.
 
 - **On your own computer**: let the local Claude Code do the work, or use any LLM API.
 - **On a cloud server**: the local Claude Code is not available, so use LLM APIs instead.
 
 ```
-Xiaozhi device   ⇄   xiaozhi-hub-server                       ⇄   Claude Code / LLM APIs / plugins & MCP / …
+Xiaozhi device   ⇄   xiaozhi-hub-server                       ⇄   Claude Code / LLM APIs / …
 listens, speaks      recognizes, routes by name, synthesizes      thinks and does the work
 ```
 
@@ -45,12 +45,6 @@ listens, speaks      recognizes, routes by name, synthesizes      thinks and doe
 - **Claude Code**: works with the account you signed in to on this computer, for example "turn this week's notes into a checklist".
 - **LLM APIs**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
 - **More agents**: Codex and Grok Bot are planned. All agents go through one session interface, so adding a new one is mostly a matter of implementing it.
-
-**Plugins and MCP**
-
-- **Plugins**: weather, news, time, music, web search, RAGFlow knowledge bases, Home Assistant smart home control, and more.
-- **MCP**: connect MCP servers, and use the tools the device itself exposes over MCP (such as volume control).
-- Plugins and MCP work with LLM APIs; Claude Code uses its own tools (reading files, searching, running commands, and so on).
 
 **Long tasks, with you all the way**
 
