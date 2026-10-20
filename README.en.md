@@ -49,7 +49,7 @@ listens, speaks      recognizes, routes by name, synthesizes      thinks and doe
 **Long tasks, with you all the way**
 
 - **Waits with you**: while Claude Code works on a task for a few minutes, the device stays with you, reports progress now and then, and tells you the result when it's done.
-- **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
+- **Interrupt any time**: while the device is speaking, press its button (on StackChan, tap the face on the screen) or say the wake word, and it stops right away.
 - **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
 
 **Hears you right**
