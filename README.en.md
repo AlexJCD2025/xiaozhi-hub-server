@@ -5,7 +5,7 @@
     <img src="hub-docs/images/logo-light.svg" alt="xiaozhi-hub-server">
   </picture>
 </p>
-<p align="center">Talk to Claude Code and other LLMs on your own computer through a Xiaozhi device.</p>
+<p align="center">A voice hub for your AI: call a name, and that agent or model takes the job.</p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10-3776ab?style=flat-square" />
@@ -25,36 +25,46 @@
 
 ---
 
-A **server gateway** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the gateway recognizes and synthesizes speech and hands what you say to the AI behind it.
+A **hub gateway** for Xiaozhi devices (M5Stack StackChan, ESP32 boards, and more). The device listens and speaks; the gateway recognizes and synthesizes speech, hands what you say to the agent or model whose name you call, and can use plugins and MCP tools along the way.
 
 - **On your own computer**: let the local Claude Code do the work, or use any LLM API.
 - **On a cloud server**: the local Claude Code is not available, so use LLM APIs instead.
 
 ```
-Xiaozhi device   ⇄   xiaozhi-hub-server                ⇄   Claude Code / LLM APIs / …
-listens, speaks      recognizes, routes, synthesizes       thinks and does the work
+Xiaozhi device   ⇄   xiaozhi-hub-server                       ⇄   Claude Code / LLM APIs / plugins & MCP / …
+listens, speaks      recognizes, routes by name, synthesizes      thinks and does the work
 ```
 
 > A community project compatible with the Xiaozhi protocol. Not an official Xiaozhi project.
 
 ## Features
 
-**Who does the work**
+**One device, many AIs**
 
-- **Claude Code**: works with the account you signed in to on this computer, for example "turn this week's notes into a checklist". For tasks that take a few minutes, the device waits with you and reports the result when it's done.
+- **Call a name to switch**: say "嗨 Claude" ("Hey Claude") for Claude Code, "嗨 DeepSeek" for DeepSeek; call names are set in the admin console. Each AI keeps its own conversation, and each device remembers the one it used last.
+- **Claude Code**: works with the account you signed in to on this computer, for example "turn this week's notes into a checklist".
 - **LLM APIs**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
-- **Planned**: agents such as Codex and Grok Bot.
+- **More agents**: Codex and Grok Bot are planned. All agents go through one session interface, so adding a new one is mostly a matter of implementing it.
 
-**Talking to it**
+**Plugins and MCP**
 
-- **Switch models by name**: say "嗨 Claude" ("Hey Claude") to hand over to Claude Code; after giving other models a call name in the admin console, say "嗨 DeepSeek" to switch. Each device remembers the one it used last.
-- **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
+- **Plugins**: weather, news, time, music, web search, RAGFlow knowledge bases, Home Assistant smart home control, and more.
+- **MCP**: connect MCP servers, and use the tools the device itself exposes over MCP (such as volume control).
+- Plugins and MCP work with LLM APIs; Claude Code uses its own tools (reading files, searching, running commands, and so on).
+
+**Long tasks, with you all the way**
+
+- **Waits with you**: while Claude Code works on a task for a few minutes, the device stays with you, reports progress now and then, and tells you the result when it's done.
 - **Interrupt any time**: tap the face on the screen while the device is speaking, and it stops right away.
-- **Mixed Chinese and English**: the default X-ASR runs offline and gets sentences like "帮我跑一下 npm install" right, with optional hotwords and corrections; Doubao streaming ASR is also available.
+- **Pick up where you left off**: reconnects resume automatically; after a longer break, say "接着上次聊" ("continue where we left off") to get back to it (with Claude Code).
+
+**Hears you right**
+
+- Mixed Chinese and English: the default X-ASR runs offline and gets sentences like "帮我跑一下 npm install" right; add misheard words to hotwords and corrections. Doubao streaming ASR is also available.
 
 **Admin console**
 
-- Set up LLMs and API keys, Claude Code permissions, call names, hotwords and corrections, and the TTS voice in a web page; see online devices and environment checks.
+- Set up LLMs and API keys, Claude Code permissions, call names, plugins, hotwords and corrections, and the TTS voice in a web page; see online devices and environment checks.
 
 ## Quick start
 
