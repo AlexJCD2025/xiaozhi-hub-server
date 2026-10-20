@@ -101,6 +101,8 @@ http://<电脑的局域网 IP>:16688/xiaozhi/ota/
 
 StackChan 的配网步骤、怎么跟设备说话，见[使用说明](hub-docs/guide.md#3-连接设备)。
 
+**部署到云端服务器**：安装方法一样，另外要放行端口、在配置里写明公网地址，见[使用说明 · 部署到云端服务器](hub-docs/guide.md#部署到云端服务器)。
+
 ## 更新与卸载
 
 | | macOS / Linux | Windows |

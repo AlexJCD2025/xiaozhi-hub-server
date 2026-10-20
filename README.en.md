@@ -101,6 +101,8 @@ http://<your computer's LAN IP>:16688/xiaozhi/ota/
 
 For StackChan setup steps and how to talk to the device, see the [user guide](hub-docs/guide.md#3-连接设备) (Chinese).
 
+**On a cloud server**: install the same way, then open the ports and set the public address in the config; see [User guide · Deploy to a cloud server](hub-docs/guide.md#部署到云端服务器) (Chinese).
+
 ## Update and uninstall
 
 | | macOS / Linux | Windows |
