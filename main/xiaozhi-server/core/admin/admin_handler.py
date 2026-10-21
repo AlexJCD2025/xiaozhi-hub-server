@@ -358,13 +358,20 @@ class AdminHandler:
             changed = await self._blocking(pages.save_grok_bots, body, merged, self.config_path)
         except ValueError as e:
             return self._error(str(e), 400)
+        note = "已保存，马上生效" if changed else "没有修改"
         if changed:
             new_merged = await self._blocking(self._merged)
             # 新条目马上可用（呼名时按条目名创建实例），不用重启；被取消的 Bot 的称呼也一并去掉
             self._push_config("LLM", new_merged.get("LLM") or {})
             self._push_config("call_names", new_merged.get("call_names") or {})
             self.logger.bind(tag=TAG).info(f"管理后台更新了 Grok Bot 条目: {', '.join(changed)}")
-        return self._json({"ok": True, "changed": changed, "note": "已保存，马上生效" if changed else "没有修改"})
+            # Bot 的名字会自动并入热词（和呼名页保存时一样），要重新加载语音识别才生效
+            if pages.describe_hotwords(new_merged)["supported"] and self._running("ASR") == \
+                    (new_merged.get("selected_module") or {}).get("ASR"):
+                result = await self._apply("ASR")
+                if result.get("failed"):
+                    note += f"；热词重新加载失败：{result['error']}"
+        return self._json({"ok": True, "changed": changed, "note": note})
 
     async def handle_call_names_learn(self, request: web.Request):
         self._require_login(request)
