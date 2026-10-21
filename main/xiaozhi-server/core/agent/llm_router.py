@@ -28,6 +28,7 @@ TAG = __name__
 logger = setup_logging()
 
 CLAUDE_CLI_ENTRY = "ClaudeCLI"
+GROK_BOT_PREFIX = "GrokBot_"  # 每个 Grok Bot 一个条目：GrokBot_<Bot 名>，由管理后台生成
 # 第一期的配置里称呼的键是 "claude"，指的就是本机 Claude Code
 LEGACY_KEYS = {"claude": CLAUDE_CLI_ENTRY}
 
@@ -71,6 +72,8 @@ def model_ready(config: dict, name: str) -> bool:
             return False
         if "api_key" in entry and _placeholder(entry.get("api_key")) and name != "CustomOpenAILLM":
             return False
+    if kind == "grok_bot" and not str(entry.get("bot_id") or "").strip():
+        return False
     return True
 
 
@@ -79,6 +82,8 @@ def model_label(name: str) -> str:
 
     if name == CLAUDE_CLI_ENTRY:
         return "Claude"
+    if name.startswith(GROK_BOT_PREFIX):
+        return name[len(GROK_BOT_PREFIX):] or "Grok Bot"
     vendor = catalog.VENDOR_BY_ENTRY.get(name)
     return vendor["label"] if vendor else name
 

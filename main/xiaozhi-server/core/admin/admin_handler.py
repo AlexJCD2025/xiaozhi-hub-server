@@ -19,7 +19,10 @@ from aiohttp import web
 
 from config.logger import setup_logging
 from core.admin import auth, catalog, config_store, connections, pages, pipeline
+from core.admin.grokbot import GrokBotAdmin
 from core.admin.status import _claude_version, collect_status
+from core.agent.agent_session import ErrorKind
+from core.agent.grokbot_client import GrokBotError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.textUtils import EMOJI_MAP
 
@@ -37,7 +40,7 @@ EMOTION_EMOJI = {name: emoji for emoji, name in EMOJI_MAP.items()}
 
 
 class AdminHandler:
-    def __init__(self, config: dict, ws_server=None, config_path: Path = None):
+    def __init__(self, config: dict, ws_server=None, config_path: Path = None, grokbot_credentials: Path = None):
         self.config = config
         self.ws_server = ws_server
         self.config_path = config_path
@@ -45,6 +48,7 @@ class AdminHandler:
         self._emotion_runs = {}  # session_id -> {"task", "index", "total", "emotion"}
         self._voice_samples = {}  # 音色 -> mp3 字节（试听缓存）
         self.logger = logger
+        self.grokbot = GrokBotAdmin(grokbot_credentials, logger=logger.bind(tag=TAG))
 
     def register(self, app: web.Application) -> None:
         app.add_routes(
@@ -82,6 +86,12 @@ class AdminHandler:
                 web.post("/admin/api/call-names", self.handle_call_names_save),
                 web.post("/admin/api/call-names/learn", self.handle_call_names_learn),
                 web.post("/admin/api/call-names/learn/stop", self.handle_call_names_learn_stop),
+                web.get("/admin/api/grokbot", self.handle_grokbot),
+                web.post("/admin/api/grokbot/login", self.handle_grokbot_login),
+                web.post("/admin/api/grokbot/login/cancel", self.handle_grokbot_login_cancel),
+                web.post("/admin/api/grokbot/logout", self.handle_grokbot_logout),
+                web.post("/admin/api/grokbot/bots/refresh", self.handle_grokbot_refresh),
+                web.post("/admin/api/grokbot/bots", self.handle_grokbot_bots),
             ]
         )
 
@@ -308,6 +318,60 @@ class AdminHandler:
             conn = connections.get(item["session_id"])
             if conn is not None:
                 conn.config[key] = copy.deepcopy(value)
+
+    # ---------- Grok Bot ----------
+
+    async def handle_grokbot(self, request: web.Request):
+        self._require_login(request)
+        merged = await self._blocking(self._merged)
+        return self._json({"ok": True, **pages.describe_grok_bot(merged), **self.grokbot.status()})
+
+    async def handle_grokbot_login(self, request: web.Request):
+        self._require_login(request)
+        url = await self.grokbot.start_login()
+        return self._json({"ok": True, "url": url, **self.grokbot.status()})
+
+    async def handle_grokbot_login_cancel(self, request: web.Request):
+        self._require_login(request)
+        await self.grokbot.cancel_login()
+        return self._json({"ok": True, **self.grokbot.status()})
+
+    async def handle_grokbot_logout(self, request: web.Request):
+        self._require_login(request)
+        await self.grokbot.logout()
+        return self._json({"ok": True, **self.grokbot.status()})
+
+    async def handle_grokbot_refresh(self, request: web.Request):
+        self._require_login(request)
+        try:
+            bots = await self.grokbot.fetch_bots()
+        except GrokBotError as e:
+            return self._error(f"读取 Bot 列表失败：{e.detail}", 400 if e.kind == ErrorKind.AUTH else 502)
+        return self._json({"ok": True, "bots": bots, **self.grokbot.status()})
+
+    async def handle_grokbot_bots(self, request: web.Request):
+        """同步勾选的 Bot：每个 Bot 一个 LLM 条目，呼名页据此列出可配称呼的模型。"""
+        self._require_login(request)
+        body = await self._read_json(request)
+        try:
+            merged = await self._blocking(self._merged)
+            changed = await self._blocking(pages.save_grok_bots, body, merged, self.config_path)
+        except ValueError as e:
+            return self._error(str(e), 400)
+        note = "已保存，马上生效" if changed else "没有修改"
+        if changed:
+            new_merged = await self._blocking(self._merged)
+            # 新条目马上可用（呼名时按条目名创建实例），不用重启；被取消的 Bot 的称呼也一并去掉
+            self._push_config("LLM", new_merged.get("LLM") or {})
+            self._push_config("call_names", new_merged.get("call_names") or {})
+            self.logger.bind(tag=TAG).info(f"管理后台更新了 Grok Bot 条目: {', '.join(changed)}")
+            # Bot 的名字会自动并入热词（和呼名页保存时一样），要重新加载语音识别才生效
+            if pages.describe_hotwords(new_merged)["supported"] and self._running("ASR") == \
+                    (new_merged.get("selected_module") or {}).get("ASR"):
+                result = await self._apply("ASR")
+                if result.get("failed"):
+                    note += f"；热词重新加载失败：{result['error']}"
+        return self._json({"ok": True, "changed": changed, "note": note})
 
     async def handle_call_names_learn(self, request: web.Request):
         self._require_login(request)

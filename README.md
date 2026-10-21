@@ -44,7 +44,8 @@
 - **叫名字换 AI**：说"嗨 Claude"交给 Claude Code，说"嗨 DeepSeek"交给 DeepSeek，称呼在管理后台配。每个 AI 各聊各的，每台设备记得上次用的是哪个。
 - **Claude Code**：用你在本机登录的账号干活，比如"把这周的笔记整理成一份清单"。
 - **大模型 API**：Claude、OpenAI、Gemini、DeepSeek、通义千问、豆包、智谱 GLM、Kimi，以及任意 OpenAI 兼容接口。
-- **更多 agent**：Codex、Grok Bot 在规划中。网关里的 agent 都走同一套会话接口，接入新的 agent 主要就是实现这套接口。
+- **Grok Bot**：给 xAI 的云端 AI 同事派活。在后台用 Cursor 账号登录、勾选 Bot、配上称呼，说"嗨 孙悟空，帮我把这周的 X 热点整理一下"，它的回复会念出来；长任务做完后在 Grok Bot App 里也能看到。走的是 App 用的内部接口，不是官方 API，App 升级后可能失效。
+- **更多 agent**：Codex 在规划中。网关里的 agent 都走同一套会话接口，接入新的 agent 主要就是实现这套接口。
 
 **长任务也能陪着做**
 

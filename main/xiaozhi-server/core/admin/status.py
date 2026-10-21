@@ -90,6 +90,20 @@ def collect_status(config: dict, merged: dict) -> dict:
             checks.append(_check("意图识别", False, "Claude 在 function_call 模式下表情和回复长度都有问题，建议用 nointent",
                                  level="warn"))
 
+    # Grok Bot：勾选了 Bot 就要有能用的登录
+    grok = [e for e in (merged.get("LLM") or {}).values() if isinstance(e, dict) and e.get("type") == "grok_bot"]
+    if grok:
+        from core.agent.grokbot_client import Credentials
+
+        st = Credentials().status()
+        if not st["logged_in"]:
+            checks.append(_check("Grok Bot", False,
+                                 "登录已失效，请到 Grok Bot 页重新登录" if st["needs_login"] else "还没登录，请到 Grok Bot 页登录"))
+        else:
+            days = int((st["expires_at"] - time.time()) / 86400)
+            checks.append(_check("Grok Bot", True, f"已登录，{len(grok)} 个 Bot，登录有效期还有 {days} 天",
+                                 level="warn" if days < 3 else "ok"))
+
     return {
         "addresses": {
             "ip": ip,
