@@ -176,6 +176,10 @@ def on_conn_open(conn: "ConnectionHandler") -> None:
             logger.bind(tag=TAG).info(f"设备 {_device_key(conn)} 沿用上次的模型 {name}")
         except Exception as e:
             logger.bind(tag=TAG).error(f"切换到上次的模型 {name} 失败，使用默认模型: {e}")
+    # 上次断开后有 Agent 在外面做完了活：等问候播完念给用户
+    from core.agent import reports
+
+    reports.on_conn_open(conn)
 
 
 def switch(conn: "ConnectionHandler", name: str, remember: bool = True) -> bool:

@@ -237,8 +237,20 @@ async def handle_call_name(conn: "ConnectionHandler", text: str):
         return rest
 
     reply = one_segment(cfg.get("reply") or "") or DEFAULT_REPLY
-    if not await _speak(conn, text, reply, cache=True):
+    # 切回一个在外面干活的 Bot（Grok Bot）：它做完的活还没念过的，跟在"我在"后面一起念
+    pending = _pending_report(conn, model)
+    if pending:
+        reply = f"{reply}。{pending}"
+    if not await _speak(conn, text, reply, cache=not pending):
         conn.logger.bind(tag=TAG).warning("呼名：TTS 尚未就绪，无法回复，按普通对话处理")
         return text
-    conn.logger.bind(tag=TAG).info(f"呼名 {model}：只有称呼，直接回复：{reply}")
+    conn.logger.bind(tag=TAG).info(f"呼名 {model}：只有称呼，直接回复：{reply[:60]}")
     return None
+
+
+def _pending_report(conn: "ConnectionHandler", model: str) -> str:
+    from core.agent import llm_router, reports
+
+    entry = (llm_router._server_config(conn).get("LLM") or {}).get(model) or {}
+    bot_id = str(entry.get("bot_id") or "").strip() if isinstance(entry, dict) else ""
+    return reports.take_text(reports.device_key(conn), bot_id) if bot_id else ""
