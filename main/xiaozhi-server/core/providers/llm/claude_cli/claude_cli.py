@@ -129,6 +129,9 @@ class ConnState:
 
 
 class LLMProvider(LLMProviderBase):
+    # 日志和提示里对这个 Agent 的称呼。其他 Agent 的 provider（grok_bot）继承本类，改掉它和 _ensure_agent 即可
+    AGENT_LABEL = "Claude Code"
+
     def __init__(self, config: dict):
         self.model_name = f"claude_cli:{config.get('model') or 'default'}"
         self.cli_path = find_claude_cli(config.get("cli_path"))
@@ -143,6 +146,13 @@ class LLMProvider(LLMProviderBase):
             # 默认 low：语音场景以快速应答为主，实测工具类问题从约 6 秒降到约 4 秒
             effort=str(config.get("effort", "low") or "").strip() or None,
         )
+        self._init_common(config)
+        self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
+        self._start_loop()
+        self._self_check()
+
+    def _init_common(self, config: dict, filler_default: str = "好的，我看一下") -> None:
+        """和具体 Agent 无关的部分：超时、填充语、进度提示、连接状态表。"""
         # 超时类配置填 0 表示不限制。单轮默认 10 分钟：Claude 干长任务时设备陪着等，期间连接不会因"没人说话"断开
         self.turn_timeout = _num(config, "turn_timeout_seconds", 600) or float("inf")
         # 无响应超时：Claude Code 连续这么久没有任何事件（文字、思考、工具调用……）就判定卡住。
@@ -156,17 +166,18 @@ class LLMProvider(LLMProviderBase):
         self.idle_timeout = _num(config, "idle_timeout_seconds", 300)  # 0：每轮结束就关闭进程
         self.resume_window = _num(config, "resume_window_minutes", 120)  # 0：不自动接续
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
-        self.filler = single_sentence(config.get("first_reply_filler", "好的，我看一下"))
+        self.filler = single_sentence(config.get("first_reply_filler", filler_default))
         self.filler_delay = _num(config, "filler_delay_seconds", 2)
         self.abandon_grace = 5.0  # 发出中断后等这么久，这一轮还没停下就强制关闭进程
-        self.store = SessionStore(Path(get_project_dir()) / "data" / "agent_sessions.json", "claude_cli")
 
         self._states: Dict[str, ConnState] = {}
         self._states_lock = threading.Lock()
         self._retiring = False  # 已被新实例替换：没有连接后就停止事件循环
         self._stopping = False  # 已安排停止事件循环
-        self._start_loop()
-        self._self_check()
+
+    def _voice_error(self, kind: ErrorKind) -> str:
+        """超时、卡住等由 provider 自己判定的错误，播报给用户的话。"""
+        return Error(kind).voice_message
 
     def _start_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
@@ -269,7 +280,7 @@ class LLMProvider(LLMProviderBase):
         agent, st.agent = st.agent, None
         if agent:
             await agent.close()
-            logger.bind(tag=TAG).info(f"已关闭 Claude Code 进程（{reason}），设备 {st.key}")
+            logger.bind(tag=TAG).info(f"已关闭 {self.AGENT_LABEL} 会话（{reason}），设备 {st.key}")
 
     def _schedule_idle_close(self, st: ConnState) -> None:
         if st.idle_handle:
@@ -295,7 +306,7 @@ class LLMProvider(LLMProviderBase):
         """
         await asyncio.sleep(self.abandon_grace)
         if st.turn_gen == gen and st.lock is not None and st.lock.locked():
-            logger.bind(tag=TAG).warning("中断后 Claude Code 仍未结束本轮，强制关闭进程")
+            logger.bind(tag=TAG).warning(f"中断后 {self.AGENT_LABEL} 仍未结束本轮，强制关闭")
             task = st.turn_task
             await self._close_agent(st, "中断无效")
             if task is not None and not task.done() and st.turn_gen == gen:
@@ -382,14 +393,14 @@ class LLMProvider(LLMProviderBase):
                 elif recorded and st.agent:
                     self.store.touch(st.key, st.agent.session_id)  # 更新最后活跃时间
             except AgentSessionError as e:
-                out.put(Error(e.kind, e.detail))
+                out.put(Error(e.kind, e.detail, voice=self._voice_error(e.kind)))
             except asyncio.CancelledError:
                 # Claude Code 卡死被强制关闭（_abandon_if_stuck 取消了这一轮）：告诉还在等的一方这一轮结束了
                 out.put(Done(interrupted=True))
                 raise
             except Exception as e:
-                logger.bind(tag=TAG).exception(f"Claude Code 处理出错: {e}")
-                out.put(Error(ErrorKind.UNKNOWN, str(e)))
+                logger.bind(tag=TAG).exception(f"{self.AGENT_LABEL} 处理出错: {e}")
+                out.put(Error(ErrorKind.UNKNOWN, str(e), voice=self._voice_error(ErrorKind.UNKNOWN)))
             finally:
                 if st.agent and not st.closed:
                     self._schedule_idle_close(st)
@@ -450,7 +461,7 @@ class LLMProvider(LLMProviderBase):
                         if st.agent:
                             asyncio.run_coroutine_threadsafe(st.agent.interrupt(), self._loop)
                             asyncio.run_coroutine_threadsafe(self._abandon_if_stuck(st, st.turn_gen), self._loop)
-                        yield self._before_notice(tail, first_at is not None or filler_sent) + Error(kind).voice_message
+                        yield self._before_notice(tail, first_at is not None or filler_sent) + self._voice_error(kind)
                         finished = True
                         return
                     continue
@@ -476,14 +487,14 @@ class LLMProvider(LLMProviderBase):
                         last_spoken_at, tail = time.time(), ev.text.strip()[-1]
                     yield ev.text
                 elif isinstance(ev, Error):
-                    logger.bind(tag=TAG).error(f"Claude Code 错误 [{ev.kind.value}]: {ev.detail[:500]}")
+                    logger.bind(tag=TAG).error(f"{self.AGENT_LABEL} 错误 [{ev.kind.value}]: {ev.detail[:500]}")
                     yield self._before_notice(tail, first_at is not None or filler_sent) + ev.voice_message
                     finished = True
                     return
                 elif isinstance(ev, Done):
                     finished = True
                     logger.bind(tag=TAG).info(
-                        f"Claude Code 本轮完成：首字 {first_at if first_at is None else round(first_at, 2)}s，"
+                        f"{self.AGENT_LABEL} 本轮完成：首字 {first_at if first_at is None else round(first_at, 2)}s，"
                         f"总耗时 {time.time() - t0:.1f}s{'，已被打断' if ev.interrupted else ''}"
                     )
                     return
@@ -548,7 +559,7 @@ class LLMProvider(LLMProviderBase):
         logger.bind(tag=TAG).debug(f"填充语之后补发表情 {emoji}")
 
     def response_no_stream(self, system_prompt, user_prompt, **kwargs):
-        logger.bind(tag=TAG).warning("claude_cli 不支持非流式调用（意图识别、记忆总结等），请为这些模块单独配置 API 模型")
+        logger.bind(tag=TAG).warning(f"{self.AGENT_LABEL} 不支持非流式调用（意图识别、记忆总结等），请为这些模块单独配置 API 模型")
         return ""
 
     def _warn_intent(self, st: ConnState) -> None:
@@ -556,5 +567,5 @@ class LLMProvider(LLMProviderBase):
             return
         intent_type = getattr(st.conn, "intent_type", None)
         if intent_type and intent_type != "nointent":
-            logger.bind(tag=TAG).warning(f"使用 claude_cli 时 Intent 应设为 nointent，当前为 {intent_type}")
+            logger.bind(tag=TAG).warning(f"使用 {self.AGENT_LABEL} 时 Intent 应设为 nointent，当前为 {intent_type}")
         st.intent_warned = True

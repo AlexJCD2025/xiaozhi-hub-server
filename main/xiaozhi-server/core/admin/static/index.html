@@ -308,6 +308,7 @@
       <button data-page="how"><span class="ico">⇄</span>工作原理</button>
       <button data-page="llm"><span class="ico">✦</span>大模型</button>
       <button data-page="calls"><span class="ico">☎</span>呼名</button>
+      <button data-page="grokbot"><span class="ico">☁</span>Grok Bot</button>
       <button data-page="asr"><span class="ico">◐</span>语音识别</button>
       <button data-page="tts"><span class="ico">♪</span>语音合成</button>
       <button data-page="intent"><span class="ico">⚙</span>意图识别</button>
@@ -410,7 +411,7 @@ $("auth-form").addEventListener("submit", async (ev) => {
 });
 $("logout").onclick = async () => { if (!confirmLeave()) return; page.dirty = null; await api("logout", {}); await route(); };
 
-const PAGES = { status: renderStatus, how: renderHow, llm: renderLLM, calls: renderCallNames, asr: renderASR, tts: renderTTS, intent: renderIntent };
+const PAGES = { status: renderStatus, how: renderHow, llm: renderLLM, calls: renderCallNames, grokbot: renderGrokBot, asr: renderASR, tts: renderTTS, intent: renderIntent };
 const page = { name: "", dirty: null, timer: null };
 function currentPage() { const p = location.hash.slice(1); return PAGES[p] ? p : "status"; }
 function confirmLeave() { return !(page.dirty && page.dirty()) || confirm("当前页面有修改还没保存，确定离开吗？"); }
@@ -643,7 +644,7 @@ async function renderLLM(root) {
   if (!llmVendor || !d.vendors.find((x) => x.id === llmVendor)) {
     llmVendor = d.vendor || (d.vendors.find((x) => x.configured) || d.vendors[0]).id;
   }
-  const current = usingCli ? `Claude Code · ${v.model || "默认模型"}` : active ? `${active.label} · ${active.model}` : d.selected;
+  const current = usingCli ? `Claude Code · ${v.model || "默认模型"}` : d.kind === "grok" && d.grok.selected ? `Grok Bot · ${d.grok.selected.bot_name}` : active ? `${active.label} · ${active.model}` : d.selected;
   const customModel = !!v.model && !c.options.model.find((o) => o.value === v.model);
   const num = (name, label, hint) => `<label class="f">${label}${hint ? `<span class="hint">${hint}</span>` : ""}
     <input class="in" data-k="${name}" value="${esc(v[name] ?? "")}" inputmode="decimal"></label>`;
@@ -665,9 +666,10 @@ async function renderLLM(root) {
         <div class="mark" style="background:var(--soft);color:var(--muted)">X</div>
         <div><b>Codex CLI</b> <span class="pill">即将支持</span><small>OpenAI 的本地编程助手</small></div>
       </div>
-      <div class="choice off" title="即将支持">
-        <div class="mark" style="background:var(--soft);color:var(--muted)">G</div>
-        <div><b>Grok Bot</b> <span class="pill">即将支持</span><small>xAI 的云端 AI 同事，派活后把结果念给你听</small></div>
+      <div class="choice ${d.kind === "grok" ? "on" : ""}" id="grok-choice" style="cursor:pointer" title="打开 Grok Bot 页">
+        <div class="mark" style="background:#e0f2fe;color:#0369a1">G</div>
+        <div><b>Grok Bot</b> ${d.kind === "grok" ? '<span class="pill ok">使用中</span>' : ""}
+          <small>${d.grok.bots.length ? `已勾选 ${d.grok.bots.length} 个 Bot，到“呼名”页配称呼后叫名字派活` : "xAI 的云端 AI 同事：登录、勾选 Bot，叫名字派活，回复念给你听"}</small></div>
       </div>
     </div>
     <div class="card panel" id="cli-form">
@@ -723,6 +725,8 @@ async function renderLLM(root) {
       <i class="${x.configured ? "set" : ""}"></i><b>${esc(x.label)}</b>
       <small>${d.vendor === x.id ? "✓ 使用中" : x.configured ? "已配置" : "未配置"}</small></button>`).join("")}</div>
     <div class="card panel" id="api-form"></div>`;
+
+  $("grok-choice").onclick = () => openPage("grokbot");
 
   // ----- 本地 CLI -----
   const form = $("cli-form");
@@ -1221,6 +1225,72 @@ async function renderIntent(root) {
     try { const r = await api("intent", values()); toast(r.note, r.failed); page.dirty = null; await openPage("intent", true); }
     catch (err) { toast(err.message, true); }
   });
+}
+
+// ---------- Grok Bot ----------
+
+async function renderGrokBot(root) {
+  const d = await api("grokbot");
+  const acc = d.account, login = d.login, entries = d.entries, bots = d.bots;
+  const fmt = (t) => (t ? new Date(t * 1000).toLocaleString() : "");
+  const days = acc.expires_at ? Math.floor((acc.expires_at * 1000 - Date.now()) / 86400000) : 0;
+  const checked = new Set(entries.map((e) => e.bot_id));
+  const aliasesOf = (id) => ((entries.find((e) => e.bot_id === id) || {}).aliases || []);
+  // 还没从云端读过列表时，先列出已勾选的
+  const list = bots || entries.map((e) => ({ id: e.bot_id, name: e.bot_name, preview: "", busy: false }));
+  root.innerHTML = `
+    <div class="page-head"><div><h1>Grok Bot</h1><p class="sub">xAI 的云端 AI 同事。用 Cursor 账号登录后勾选 Bot，再到“呼名”页给它配称呼，对设备说“嗨 孙悟空，帮我……”就能派活，它的回复会念出来；长任务做完后在 Grok Bot App 里也能看到。</p></div>
+      <span class="pill ${acc.logged_in ? "ok" : "warn"}">${acc.logged_in ? "已登录" : acc.needs_login ? "登录已失效" : "未登录"}</span></div>
+    <div class="banner warn">走的是 Grok Bot 桌面 App 用的内部接口，不是官方公开的 API：App 升级后可能失效，使用频率请和手动聊天相当。凭证只保存在本机，不会显示在页面上。</div>
+    <div class="section-title">账号</div>
+    <div class="card panel">
+      ${login.pending ? `<div class="banner info">正在等待你在浏览器里批准登录。页面没有自动打开的话，复制下面的地址在浏览器里打开，登录 Cursor 账号后点“批准”（不是“打开 Grok Bot”）。</div>
+        <div class="kv"><div class="k">登录地址</div><code style="word-break:break-all">${esc(login.url)}</code><button class="btn sm copy" data-copy="${esc(login.url)}">复制</button></div>
+        <div class="actions"><a class="btn" href="${esc(login.url)}" target="_blank" rel="noopener">打开登录页</a><button class="btn" id="gb-cancel">取消</button></div>`
+      : `${login.result && !login.result.ok ? `<div class="banner err">${esc(login.result.note)}</div>` : ""}
+        ${acc.logged_in ? `<p style="margin:0 0 12px">已登录，登录有效期还有 ${days} 天（到 ${esc(fmt(acc.expires_at))}）。快到期时会自动续期；续期失败这里会提示重新登录。</p>`
+          : acc.needs_login ? '<p style="margin:0 0 12px">登录已失效（服务端要求重新登录），请重新登录。</p>'
+          : '<p style="margin:0 0 12px">还没登录。点“登录”会给出一个 Cursor 的登录地址，在浏览器里批准即可，不需要在这里输入密码。</p>'}
+        <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="gb-login">${acc.logged_in ? "重新登录" : "登录"}</button>
+          ${acc.logged_in || acc.needs_login ? '<button class="btn" id="gb-logout">退出登录</button>' : ""}</div>`}
+    </div>
+    <div class="section-title">Bot</div>
+    <div class="card panel">
+      ${!acc.logged_in ? '<p class="muted" style="margin:0">登录后再读取 Bot 列表。</p>' : `
+      ${d.bots_error ? `<div class="banner err">读取 Bot 列表失败：${esc(d.bots_error)}</div>` : ""}
+      <p class="muted small" style="margin:0 0 4px">${bots ? `列表读取于 ${esc(fmt(d.bots_at))}。` : "还没从云端读取 Bot 列表（会唤醒休眠的云端电脑，要几秒）。"}勾选并保存后，到<a href="#calls">呼名</a>页给它配称呼，设备上才叫得到。</p>
+      ${list.length ? list.map((b) => `<label class="switch" style="margin-top:8px"><input type="checkbox" data-bot="${esc(b.id)}" data-name="${esc(b.name)}" ${checked.has(b.id) ? "checked" : ""}>
+          <span>${esc(b.name)}${b.busy ? ' <span class="pill">忙</span>' : ""}${checked.has(b.id) ? (aliasesOf(b.id).length ? ` <span class="pill ok">称呼：${esc(aliasesOf(b.id).join("、"))}</span>` : ' <span class="pill warn">还没配称呼</span>') : ""}</span>
+          <small>${esc(b.preview || "")}</small></label>`).join("") : '<p class="muted" style="margin:8px 0 0">没有 Bot。先在 Grok Bot App 里创建，再点“重新读取”。</p>'}
+      <div class="actions"><span class="result muted">保存后马上生效，不用重启服务。</span>
+        <button class="btn" id="gb-refresh">${bots ? "重新读取" : "读取 Bot 列表"}</button><button class="btn primary" id="gb-save">保存</button></div>`}
+    </div>`;
+  root.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
+  if ($("gb-login")) $("gb-login").onclick = (e) => busy(e.target, async () => {
+    try { const r = await api("grokbot/login", {}); window.open(r.url, "_blank", "noopener"); await openPage("grokbot", true); }
+    catch (err) { toast(err.message, true); }
+  });
+  if ($("gb-cancel")) $("gb-cancel").onclick = async () => { await api("grokbot/login/cancel", {}); await openPage("grokbot", true); };
+  if ($("gb-logout")) $("gb-logout").onclick = async () => {
+    if (!confirm("退出登录会删除本机保存的凭证，设备上将叫不到 Grok Bot。确定吗？")) return;
+    await api("grokbot/logout", {}); await openPage("grokbot", true);
+  };
+  if ($("gb-refresh")) $("gb-refresh").onclick = (e) => busy(e.target, async () => {
+    try { await api("grokbot/bots/refresh", {}); await openPage("grokbot", true); } catch (err) { toast(err.message, true); }
+  });
+  if ($("gb-save")) $("gb-save").onclick = (e) => busy(e.target, async () => {
+    const picked = [...root.querySelectorAll("[data-bot]:checked")].map((c) => ({ id: c.dataset.bot, name: c.dataset.name }));
+    try { const r = await api("grokbot/bots", { bots: picked }); toast(r.changed.length ? r.note : "没有修改"); await openPage("grokbot", true); }
+    catch (err) { toast(err.message, true); }
+  });
+  if (login.pending) {
+    // 等批准期间每 3 秒看一次，登录成功后自动刷新本页
+    page.timer = setInterval(async () => {
+      if (document.hidden) return;
+      try { const s = await api("grokbot", undefined, true); if (!s.login.pending) { clearInterval(page.timer); page.timer = null; await openPage("grokbot", true); } }
+      catch (e) { onDevicesError(e); }
+    }, 3000);
+  }
 }
 
 // ---------- 呼名 ----------

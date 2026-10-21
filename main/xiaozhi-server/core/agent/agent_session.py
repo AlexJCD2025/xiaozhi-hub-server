@@ -1,7 +1,7 @@
 """Agent 会话的统一接口。
 
 上层（LLM provider）只关心三件事：发一句话拿回一段段文字、打断、关闭。
-Claude 用 claude-agent-sdk 实现，以后的 Codex 用 app-server 实现，都遵循这里的接口和事件。
+Claude 用 claude-agent-sdk 实现，Grok Bot 用云端网关实现，以后的 Codex 用 app-server 实现，都遵循这里的接口和事件。
 """
 
 from abc import ABC, abstractmethod
@@ -72,10 +72,11 @@ class Done:
 class Error:
     kind: ErrorKind
     detail: str = ""
+    voice: str = ""  # 播报给用户的话；留空用上面 Claude 的默认文案（其他 Agent 传自己的）
 
     @property
     def voice_message(self) -> str:
-        return VOICE_ERROR_MESSAGES.get(self.kind, VOICE_ERROR_MESSAGES[ErrorKind.UNKNOWN])
+        return self.voice or VOICE_ERROR_MESSAGES.get(self.kind, VOICE_ERROR_MESSAGES[ErrorKind.UNKNOWN])
 
 
 AgentEvent = Union[TextDelta, Activity, Done, Error]

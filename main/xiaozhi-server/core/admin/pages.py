@@ -68,6 +68,8 @@ def llm_kind(merged: dict, name: str = None) -> str:
     name = name or _selected(merged, "LLM")
     if config_store.entry_type(merged, "LLM", name) == "claude_cli":
         return "cli"
+    if config_store.entry_type(merged, "LLM", name) == "grok_bot":
+        return "grok"
     if name in catalog.VENDOR_BY_ENTRY and config_store.entry_type(merged, "LLM", name) == "openai":
         return "api"
     return "other"
@@ -124,7 +126,94 @@ def describe_llm(merged: dict) -> dict:
         "vendor": vendor["id"] if vendor else None,
         "claude": describe_claude_cli(merged),
         "vendors": [describe_vendor(v, merged) for v in catalog.LLM_VENDORS],
+        "grok": {"bots": grok_entries(merged),
+                 "selected": next((g for g in grok_entries(merged) if g["entry"] == selected), None)},
     }
+
+
+# ---------- 大模型：Grok Bot ----------
+
+GROK_BOT_PREFIX = "GrokBot_"
+GROK_NAME_BAD = re.compile(r"[^\w一-鿿]+")
+
+
+def grok_entries(merged: dict) -> list:
+    """配置里已勾选的 Grok Bot：每个一个 type 为 grok_bot 的 LLM 条目。"""
+    result = []
+    for name, entry in (merged.get("LLM") or {}).items():
+        if isinstance(entry, dict) and entry.get("type") == "grok_bot":
+            result.append({"entry": str(name), "bot_id": str(entry.get("bot_id") or "").strip(),
+                           "bot_name": str(entry.get("bot_name") or "").strip() or str(name)})
+    return result
+
+
+def grok_entry_name(bot_name: str, bot_id: str, taken: dict) -> str:
+    """条目名：GrokBot_<Bot 名>（只留字母、数字、下划线和汉字）；重名时带上 id 的前几位。"""
+    base = GROK_BOT_PREFIX + (GROK_NAME_BAD.sub("", bot_name or "") or bot_id[:8])
+    name = base
+    while name in taken and taken[name] != bot_id:
+        name = f"{base}_{bot_id[:4]}" if name == base else f"{name}_"
+    return name
+
+
+def describe_grok_bot(merged: dict) -> dict:
+    """已勾选的 Bot，以及每个 Bot 在呼名页配的称呼（没配的为空，页面上提示去配）。"""
+    from core.agent import call_names
+
+    aliases = {str(k): call_names._aliases(v) for k, v in ((merged.get("call_names") or {}).get("models") or {}).items()}
+    bots = grok_entries(merged)
+    for b in bots:
+        b["aliases"] = aliases.get(b["entry"], [])
+    return {"entries": bots, "default": _selected(merged, "LLM")}
+
+
+def save_grok_bots(payload: dict, merged: dict, path: Path = None) -> list:
+    """按 payload["bots"]（[{"id", "name"}]）同步条目：新勾选的建条目，取消的删条目（连同它的称呼）。
+
+    返回修改了的条目名。正在作为默认模型使用的 Bot 不能取消。"""
+    raw = payload.get("bots")
+    if not isinstance(raw, list):
+        raise ValueError("Bot 列表格式不对")
+    wanted = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Bot 列表格式不对")
+        bot_id = str(item.get("id") or "").strip()
+        if not bot_id:
+            raise ValueError("Bot 缺少 id")
+        wanted[bot_id] = str(item.get("name") or "").strip() or bot_id[:8]
+    current = {g["bot_id"]: g for g in grok_entries(merged)}
+    taken = {g["entry"]: g["bot_id"] for g in grok_entries(merged)}
+    taken.update({name: "" for name in (merged.get("LLM") or {}) if name not in taken})
+    selected = _selected(merged, "LLM")
+    changed = []
+    with config_store.edit_custom(path) as data:
+        llm = data.setdefault("LLM", CommentedMap())
+        for bot_id, name in wanted.items():
+            old = current.get(bot_id)
+            if old and old["bot_name"] == name:
+                continue
+            entry_name = old["entry"] if old else grok_entry_name(name, bot_id, taken)
+            taken[entry_name] = bot_id
+            block = llm.get(entry_name)
+            if not isinstance(block, CommentedMap):
+                block = CommentedMap()
+                llm[entry_name] = block
+            block["type"] = "grok_bot"
+            block["bot_id"] = bot_id
+            block["bot_name"] = name
+            changed.append(entry_name)
+        for bot_id, old in current.items():
+            if bot_id in wanted:
+                continue
+            if old["entry"] == selected:
+                raise ValueError(f"{old['bot_name']} 正在作为默认模型使用，先到“大模型”页换掉再取消")
+            llm.pop(old["entry"], None)
+            models = (data.get("call_names") or {}).get("models")
+            if isinstance(models, dict):
+                models.pop(old["entry"], None)
+            changed.append(old["entry"])
+    return changed
 
 
 def _check_positive_number(name: str, raw) -> None:
@@ -688,6 +777,10 @@ def call_targets(merged: dict) -> list:
     if config_store.entry_type(merged, "LLM", CLAUDE_CLI_ENTRY) == "claude_cli":
         result.append({"entry": CLAUDE_CLI_ENTRY, "label": "Claude（本机 Claude Code）",
                        "defaults": list(call_names.DEFAULT_MODELS[CLAUDE_CLI_ENTRY])})
+    for g in grok_entries(merged):
+        if g["bot_id"]:
+            result.append({"entry": g["entry"], "label": f"{g['bot_name']}（Grok Bot）",
+                           "defaults": [g["bot_name"].lower()]})
     for vendor in catalog.LLM_VENDORS:
         if describe_vendor(vendor, merged)["configured"]:
             result.append({"entry": vendor["entry"], "label": f"{vendor['label']}（API）",

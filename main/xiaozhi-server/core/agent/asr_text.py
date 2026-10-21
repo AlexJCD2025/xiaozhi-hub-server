@@ -127,14 +127,17 @@ def call_name_hotwords(config: dict) -> list:
     if cfg.get("enabled") is False:
         return []
     models = cfg.get("models") or call_names.DEFAULT_MODELS
+    llm = (config or {}).get("LLM") or {}
     words = []
     for entry in models:
         if entry == "ClaudeCLI":
             words.append("Claude")
         elif entry in catalog.VENDOR_BY_ENTRY:
             words.append(re.sub(r"\s*GLM$", "", catalog.VENDOR_BY_ENTRY[entry]["label"]) or entry)
+        elif isinstance(llm.get(entry), dict) and llm[entry].get("type") == "grok_bot":
+            words.append(str(llm[entry].get("bot_name") or "").strip())  # Grok Bot 的名字（如"孙悟空"）
     # 本机 Claude Code 和 Claude API 都配了称呼时都是 "Claude"，去重
-    return list(dict.fromkeys(w for w in words if w != "自定义"))
+    return list(dict.fromkeys(w for w in words if w and w != "自定义"))
 
 
 def effective_hotwords(asr_entry: dict, config: dict) -> list:
