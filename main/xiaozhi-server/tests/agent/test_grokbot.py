@@ -525,8 +525,8 @@ class FakeGrokAgent:
     start_error = None
     delay = 0.0
 
-    def __init__(self, hub, config, logger=None):
-        self.hub, self.config = hub, config
+    def __init__(self, hub, config, logger=None, on_report=None):
+        self.hub, self.config, self.on_report = hub, config, on_report
         self.session_id = config.bot_id
         self.alive = False
         self.sent, self.interrupts, self.closed = [], 0, False
@@ -719,3 +719,212 @@ def test_provider_slow_start_is_not_a_stall(provider, tmp_path, monkeypatch):
     c = conn()
     p.on_conn_open(c)
     assert run(p, c, "你好") == "收到。"
+
+
+# ---------- 被打断后做完再汇报、热身、提示词 ----------
+
+from core.agent import reports as reports_mod  # noqa: E402
+
+
+def reporting_session(hub, **kw):
+    got = []
+    s = GrokBotSession(hub, cfg(**kw), on_report=got.append)
+    return s, got
+
+
+async def test_interrupt_then_watch_reports_when_done(cloud, hub):
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.interrupt()
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert isinstance(evs[-1], Done) and evs[-1].interrupted and got == []
+    # 打断后 Bot 继续做：回复和空闲由后台盯着的任务收，做完交给 on_report
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("查完了。")})
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("一共三条。", "e3")})
+    await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+    await wait_until(lambda: got, timeout=3)
+    assert got == ["孙悟空做完了：查完了。一共三条。"]
+    await s.close()
+
+
+async def test_watch_reports_waiting_for_user(cloud, hub):
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.interrupt()
+
+    task = asyncio.ensure_future(script())
+    await collect(s)
+    await task
+    await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False, "awaitingUserResponse": "approval"}})
+    await wait_until(lambda: got, timeout=3)
+    assert got == ["孙悟空在等你去 App 里处理。"]
+    await s.close()
+
+
+async def test_watch_survives_session_close_and_idle_stream(cloud, hub):
+    """设备断开（会话关闭）后后台盯着的任务还在，事件流也因为它还有订阅而不关。"""
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.interrupt()
+
+    task = asyncio.ensure_future(script())
+    await collect(s)
+    await task
+    await s.close()
+    await real_sleep(0.3)  # 超过 hub 的空闲关闭时间（0.1）
+    assert hub._task is not None and not hub._task.done()
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("好了。")})
+    await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+    await wait_until(lambda: got, timeout=3)
+    assert got == ["孙悟空做完了：好了。"]
+    await wait_until(lambda: hub._task is None, timeout=2)  # 汇报完没人订阅了，事件流关闭
+
+
+async def test_new_send_takes_watch_prelude(cloud, hub):
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.interrupt()
+
+    task = asyncio.ensure_future(script())
+    await collect(s)
+    await task
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("查到一半。")})
+    await wait_until(lambda: s._watch is not None and s._watch.texts, timeout=3)
+    # Bot 还在忙，用户又派新活：先念它刚才回的，之后的回复新的一轮自己念；后台任务停掉，不再汇报
+    async def script2():
+        await wait_until(lambda: len(cloud.sent) == 2)
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("新活好了。", "e9")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task2 = asyncio.ensure_future(script2())
+    evs = await collect(s, "第二件事")
+    await task2
+    assert texts(evs) == ["孙悟空刚才回了：查到一半。", "新活好了。"] and isinstance(evs[-1], Done)
+    await real_sleep(0.3)
+    assert got == [] and s._watch is None
+    await s.close()
+
+
+async def test_no_watch_when_turn_already_finished(cloud, hub):
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("收到。")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == ["收到。"] and not evs[-1].interrupted and s._watch is None
+    await s.close()
+
+
+async def test_voice_hint_appended_and_echo_by_content(cloud, hub):
+    s = GrokBotSession(hub, cfg(voice_hint="请简短回答"))
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        sent = cloud.sent[-1]["prompt"]
+        assert sent == "你好（请简短回答）"
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended",
+                                        "entry": {"id": "e1", "kind": "message", "role": "user", "content": sent}})  # 没带 nonce 的回显
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("好。")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == ["好。"]
+    await s.close()
+
+
+def test_provider_defaults_filler_delay_and_hint(provider):
+    p0 = grok_mod.LLMProvider({"bot_id": "b", "bot_name": "x"})
+    assert p0.filler_delay == 4 and p0.session_config.voice_hint == grok_mod.DEFAULT_VOICE_HINT
+    p = grok_mod.LLMProvider({"bot_id": "b", "bot_name": "x", "voice_hint": "", "filler_delay_seconds": 1})
+    assert p.session_config.voice_hint == "" and p.filler_delay == 1
+
+
+def test_provider_warms_up_on_conn_open(provider):
+    c = conn()
+    provider.on_conn_open(c)
+    deadline = time.time() + 2
+    while time.time() < deadline and not FakeGrokAgent.instances:
+        time.sleep(0.02)
+    time.sleep(0.05)
+    assert len(FakeGrokAgent.instances) == 1 and FakeGrokAgent.instances[0].alive and FakeGrokAgent.instances[0].sent == []
+    assert run(provider, c, "你好") == "收到。"
+    assert len(FakeGrokAgent.instances) == 1  # 热身的会话直接复用
+
+
+def test_provider_speaks_pending_report_first(provider):
+    reports_mod.clear()
+    c = conn()
+    provider.on_conn_open(c)
+    reports_mod.add("dev-1", "bot-1", "孙悟空做完了：好。")
+    assert run(provider, c, "再来一件") == "孙悟空做完了：好。收到。"
+    assert not reports_mod.pending("dev-1")
+
+
+def test_provider_wires_on_report_to_reports(provider):
+    reports_mod.clear()
+    c = conn()
+    provider.on_conn_open(c)
+    run(provider, c, "你好")
+    FakeGrokAgent.instances[0].on_report("孙悟空做完了：嗯。")
+    assert reports_mod.take_text("dev-1", "bot-1") == "孙悟空做完了：嗯。"
+
+
+async def test_reported_watch_is_not_spoken_again_as_prelude(cloud, hub):
+    """真实账号实测发现：后台盯着的任务已经汇报进待汇报箱后，下一轮又把同样的话当开头念了一遍。"""
+    s, got = reporting_session(hub)
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.interrupt()
+
+    task = asyncio.ensure_future(script())
+    await collect(s)
+    await task
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("第一。")})
+    await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+    await wait_until(lambda: got, timeout=3)
+    assert got == ["孙悟空做完了：第一。"]
+
+    async def script2():
+        await wait_until(lambda: len(cloud.sent) == 2)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("好。", "e9")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task2 = asyncio.ensure_future(script2())
+    evs = await collect(s, "再来一句")
+    await task2
+    assert texts(evs) == ["好。"]  # 没有"刚才回了：第一。"
+    await s.close()

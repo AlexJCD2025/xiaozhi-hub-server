@@ -151,7 +151,7 @@ class LLMProvider(LLMProviderBase):
         self._start_loop()
         self._self_check()
 
-    def _init_common(self, config: dict, filler_default: str = "好的，我看一下") -> None:
+    def _init_common(self, config: dict, filler_default: str = "好的，我看一下", filler_delay_default: float = 2) -> None:
         """和具体 Agent 无关的部分：超时、填充语、进度提示、连接状态表。"""
         # 超时类配置填 0 表示不限制。单轮默认 10 分钟：Claude 干长任务时设备陪着等，期间连接不会因"没人说话"断开
         self.turn_timeout = _num(config, "turn_timeout_seconds", 600) or float("inf")
@@ -167,7 +167,7 @@ class LLMProvider(LLMProviderBase):
         self.resume_window = _num(config, "resume_window_minutes", 120)  # 0：不自动接续
         self.resume_keywords = list(config.get("resume_keywords") or DEFAULT_RESUME_KEYWORDS)
         self.filler = single_sentence(config.get("first_reply_filler", filler_default))
-        self.filler_delay = _num(config, "filler_delay_seconds", 2)
+        self.filler_delay = _num(config, "filler_delay_seconds", filler_delay_default)
         self.abandon_grace = 5.0  # 发出中断后等这么久，这一轮还没停下就强制关闭进程
 
         self._states: Dict[str, ConnState] = {}

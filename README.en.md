@@ -44,7 +44,7 @@ listens, speaks      recognizes, routes by name, synthesizes      thinks and doe
 - **Call a name to switch**: say "嗨 Claude" ("Hey Claude") for Claude Code, "嗨 DeepSeek" for DeepSeek; call names are set in the admin console. Each AI keeps its own conversation, and each device remembers the one it used last.
 - **Claude Code**: works with the account you signed in to on this computer, for example "turn this week's notes into a checklist".
 - **LLM APIs**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
-- **Grok Bot**: hand tasks to xAI's cloud AI teammates. Sign in with your Cursor account in the admin console, tick the Bots you want, give them call names, then say "嗨 孙悟空, summarize this week's X trends" and the reply is read out; long tasks also show up in the Grok Bot app. This uses the same private endpoints as the desktop app, not an official API, so an app update may break it.
+- **Grok Bot**: hand tasks to xAI's cloud AI teammates. Sign in with your Cursor account in the admin console, tick the Bots you want, give them call names, then say "嗨 孙悟空, summarize this week's X trends" and the reply is read out. You can stop waiting on a long task; when the Bot finishes in the cloud, the device reports back. This uses the same private endpoints as the desktop app, not an official API, so an app update may break it.
 - **More agents**: Codex is planned. All agents go through one session interface, so adding a new one is mostly a matter of implementing it.
 
 **Long tasks, with you all the way**

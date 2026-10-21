@@ -215,3 +215,18 @@ async def test_only_call_name_reply_audio_is_cached(spoken, monkeypatch):
     assert sent == [("sleep", call_names.CACHED_REPLY_DELAY),
                     ("FIRST", [b"opus-" + call_names.DEFAULT_REPLY.encode()], call_names.DEFAULT_REPLY),
                     ("LAST", [], None)]
+
+
+async def test_only_call_name_speaks_pending_report_of_grok_bot(spoken):
+    from core.agent import reports
+
+    reports.clear()
+    c = make_conn({"models": {"GrokBot_孙悟空": ["孙悟空"]}})
+    c.config["LLM"] = {"GrokBot_孙悟空": {"type": "grok_bot", "bot_id": "bot-1", "bot_name": "孙悟空"}}
+    c.session_id, c.device_id = "s-1", "dev-1"
+    reports.add("dev-1", "bot-1", "孙悟空做完了：好。")
+    assert await handle_call_name(c, "嗨 孙悟空") is None
+    assert spoken["tts"] == [call_names.DEFAULT_REPLY + "。孙悟空做完了：好。"]
+    assert not reports.pending("dev-1")
+    assert await handle_call_name(c, "嗨 孙悟空") is None
+    assert spoken["tts"][-1] == call_names.DEFAULT_REPLY  # 念过就没有了
