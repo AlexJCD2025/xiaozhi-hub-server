@@ -648,18 +648,22 @@ async function renderLLM(root) {
   const customModel = !!v.model && !c.options.model.find((o) => o.value === v.model);
   const num = (name, label, hint) => `<label class="f">${label}${hint ? `<span class="hint">${hint}</span>` : ""}
     <input class="in" data-k="${name}" value="${esc(v[name] ?? "")}" inputmode="decimal"></label>`;
+  // "默认"只是设备刚连上时用的模型；配了称呼的模型随时能叫到，所以每个模型都标出它的称呼
+  const callPill = (entry) => d.call_names_enabled && d.callable[entry] ? `<span class="pill" title="说“嗨 + 称呼”就换成它">称呼：${esc(d.callable[entry].slice(0, 3).join("、"))}${d.callable[entry].length > 3 ? "…" : ""}</span>` : "";
+  const defaultPill = (on) => (on ? '<span class="pill ok">默认模型</span>' : "");
+  const grokAliases = d.grok.bots.flatMap((g) => (d.callable[g.entry] || []).slice(0, 1));
 
   root.innerHTML = `
-    <div class="page-head"><div><h1>大模型</h1><p class="sub">一次只能使用一种：本地 CLI，或者 API Key。</p></div>
-      <span class="pill ${d.kind === "other" ? "warn" : "ok"}">当前：${esc(current)}</span></div>
-    ${d.kind === "other" ? `<div class="banner warn">当前使用的 ${esc(d.selected)} 不在后台管理范围内（可能是手动改了配置文件）。在下面选择一种并点"保存并使用"即可切换。</div>` : ""}
-    ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里选的是 ${esc(d.selected)}，但服务仍在使用 ${esc(d.running)}。</div>` : ""}
+    <div class="page-head"><div><h1>大模型</h1><p class="sub">设备刚连上时用默认模型。给模型配了称呼后，句子开头说“嗨 + 称呼”就换成它，几个模型可以同时用（称呼在<a href="#calls">呼名</a>页配）。</p></div>
+      <span class="pill ${d.kind === "other" ? "warn" : "ok"}">默认：${esc(current)}</span></div>
+    ${d.kind === "other" ? `<div class="banner warn">当前默认的 ${esc(d.selected)} 不在后台管理范围内（可能是手动改了配置文件）。在下面选择一种并点"保存并设为默认"即可切换。</div>` : ""}
+    ${d.running && d.running !== d.selected ? `<div class="banner warn">配置里的默认模型是 ${esc(d.selected)}，但服务仍在用 ${esc(d.running)}。</div>` : ""}
 
     <div class="section-title">本地 CLI 与智能体 · 用你自己的账号，不走下面的 API Key</div>
     <div class="choices three">
       <div class="choice ${usingCli ? "on" : ""}">
         <div class="mark" style="background:#fef3c7;color:#b45309">C</div>
-        <div><b>Claude Code CLI</b> ${usingCli ? '<span class="pill ok">使用中</span>' : ""}
+        <div><b>Claude Code CLI</b> ${defaultPill(usingCli)} ${callPill("ClaudeCLI")}
           <small>${inst.installed ? esc(`${inst.version} · ${inst.path}`) : '<span style="color:var(--err)">没有找到 Claude Code，请先安装并登录</span>'}</small></div>
       </div>
       <div class="choice off" title="即将支持">
@@ -668,13 +672,13 @@ async function renderLLM(root) {
       </div>
       <div class="choice ${d.kind === "grok" ? "on" : ""}" id="grok-choice" style="cursor:pointer" title="打开 Grok Bot 页">
         <div class="mark" style="background:#e0f2fe;color:#0369a1">G</div>
-        <div><b>Grok Bot</b> ${d.kind === "grok" ? '<span class="pill ok">使用中</span>' : ""}
-          <small>${d.grok.bots.length ? `已勾选 ${d.grok.bots.length} 个 Bot，到“呼名”页配称呼后叫名字派活` : "xAI 的云端 AI 同事：登录、勾选 Bot，叫名字派活，回复念给你听"}</small></div>
+        <div><b>Grok Bot</b> ${defaultPill(d.kind === "grok")} ${grokAliases.length ? `<span class="pill">称呼：${esc(grokAliases.slice(0, 3).join("、"))}${grokAliases.length > 3 ? "…" : ""}</span>` : ""}
+          <small>${d.grok.bots.length ? `已勾选 ${d.grok.bots.length} 个 Bot${grokAliases.length < d.grok.bots.length ? "，有的还没配称呼" : ""}，叫名字就能派活` : "xAI 的云端 AI 同事：登录、勾选 Bot，叫名字派活，回复念给你听"}</small></div>
       </div>
     </div>
     <div class="card panel" id="cli-form">
       ${c.exists ? `
-      ${usingCli ? "" : `<div class="banner info">现在没有使用本地 CLI${active ? `，正在使用 API Key 里的 ${esc(active.label)}` : ""}。这里改的设置要点"保存并使用"才会生效。</div>`}
+      ${usingCli ? "" : `<div class="banner info">本地 CLI 不是默认模型${active ? `（默认是 ${esc(active.label)}）` : ""}${d.callable.ClaudeCLI ? "，但配了称呼，说“嗨 Claude”就能用它" : ""}。这里改的设置保存后，设备重新连接时生效；想让它当默认模型就点"保存并设为默认"。</div>`}
       <div class="cli-row"><div class="cli-k">模型</div><div>
         <div class="seg" data-k="model">${c.options.model.map((o) => `<button type="button" data-v="${o.value}" class="${o.value === v.model ? "on" : ""}">${o.label}<small>${esc(o.hint)}</small></button>`).join("")}
           <button type="button" data-v="__custom" class="${customModel ? "on" : ""}">自定义<small>填完整模型名</small></button></div>
@@ -716,14 +720,14 @@ async function renderLLM(root) {
       <div class="actions"><span class="result" id="cli-result"></span>
         <button class="btn" id="cli-reset">撤销修改</button>
         <button class="btn ${usingCli ? "primary" : ""}" id="cli-save">保存</button>
-        ${usingCli ? "" : `<button class="btn primary" id="cli-use" ${inst.installed ? "" : "disabled"}>保存并使用</button>`}
+        ${usingCli ? "" : `<button class="btn primary" id="cli-use" ${inst.installed ? "" : "disabled"}>保存并设为默认</button>`}
       </div>` : '<div class="muted">配置文件里没有 ClaudeCLI 条目，请重新运行安装脚本生成配置。</div>'}
     </div>
 
     <div class="section-title">API Key · 云端模型，统一走 OpenAI 协议</div>
     <div class="vendors">${d.vendors.map((x) => `<button class="vendor ${x.id === llmVendor ? "on" : ""} ${d.vendor === x.id ? "using" : ""}" data-vendor="${x.id}">
       <i class="${x.configured ? "set" : ""}"></i><b>${esc(x.label)}</b>
-      <small>${d.vendor === x.id ? "✓ 使用中" : x.configured ? "已配置" : "未配置"}</small></button>`).join("")}</div>
+      <small>${d.vendor === x.id ? "✓ 默认" : x.configured ? (d.callable[x.entry] ? `称呼：${esc(d.callable[x.entry][0])}` : "已配置") : "未配置"}</small></button>`).join("")}</div>
     <div class="card panel" id="api-form"></div>`;
 
   $("grok-choice").onclick = () => openPage("grokbot");
@@ -781,7 +785,7 @@ async function renderLLM(root) {
     const x = d.vendors.find((y) => y.id === llmVendor), using = d.vendor === x.id;
     const box = $("api-form");
     box.innerHTML = `
-      ${using ? "" : `<div class="banner info">${active ? `现在使用的是 ${esc(active.label)}。` : ""}${esc(x.label)} 设置好后点"保存并使用"切换过来。</div>`}
+      ${using ? "" : `<div class="banner info">${esc(x.label)} 不是默认模型${active ? `（默认是 ${esc(active.label)}）` : ""}${d.callable[x.entry] ? `，但配了称呼“${esc(d.callable[x.entry][0])}”，叫名字就能用它` : "。填好保存后到呼名页配上称呼，就能叫名字用它"}；想让它当默认模型就点"保存并设为默认"。</div>`}
       ${x.conflict ? `<div class="banner err">配置里已有一个叫 ${esc(x.entry)} 的条目，但不是 OpenAI 兼容类型，请在配置文件里改名或删掉它。</div>` : ""}
       ${x.hint ? `<div class="banner info">${esc(x.hint)}</div>` : ""}
       <div class="grid2">
@@ -797,7 +801,7 @@ async function renderLLM(root) {
       <div class="actions"><span class="result" id="api-result"></span>
         <button class="btn" id="api-test">测试连接</button>
         <button class="btn ${using ? "primary" : ""}" id="api-save">保存</button>
-        ${using ? "" : '<button class="btn primary" id="api-use">保存并使用</button>'}</div>`;
+        ${using ? "" : '<button class="btn primary" id="api-use">保存并设为默认</button>'}</div>`;
     const values = () => ({ base_url: $("api-url").value.trim(), model: $("api-model").value.trim(), api_key: $("api-key").value.trim() });
     apiDirty = snapshot(values);
     const result = (html) => ($("api-result").innerHTML = html);
@@ -1239,7 +1243,7 @@ async function renderGrokBot(root) {
   // 还没从云端读过列表时，先列出已勾选的
   const list = bots || entries.map((e) => ({ id: e.bot_id, name: e.bot_name, preview: "", busy: false }));
   root.innerHTML = `
-    <div class="page-head"><div><h1>Grok Bot</h1><p class="sub">xAI 的云端 AI 同事。用 Cursor 账号登录后勾选 Bot，再到“呼名”页给它配称呼，对设备说“嗨 孙悟空，帮我……”就能派活，它的回复会念出来；长任务做完后在 Grok Bot App 里也能看到。</p></div>
+    <div class="page-head"><div><h1>Grok Bot</h1><p class="sub">xAI 的云端 AI 同事。用 Cursor 账号登录后勾选 Bot，它的名字会自动成为称呼，对设备说“嗨 孙悟空，帮我……”就能派活，它的回复会念出来；长任务做完后在 Grok Bot App 里也能看到。</p></div>
       <span class="pill ${acc.logged_in ? "ok" : "warn"}">${acc.logged_in ? "已登录" : acc.needs_login ? "登录已失效" : "未登录"}</span></div>
     <div class="banner warn">走的是 Grok Bot 桌面 App 用的内部接口，不是官方公开的 API：App 升级后可能失效，使用频率请和手动聊天相当。凭证只保存在本机，不会显示在页面上。</div>
     <div class="section-title">账号</div>
@@ -1258,7 +1262,7 @@ async function renderGrokBot(root) {
     <div class="card panel">
       ${!acc.logged_in ? '<p class="muted" style="margin:0">登录后再读取 Bot 列表。</p>' : `
       ${d.bots_error ? `<div class="banner err">读取 Bot 列表失败：${esc(d.bots_error)}</div>` : ""}
-      <p class="muted small" style="margin:0 0 4px">${bots ? `列表读取于 ${esc(fmt(d.bots_at))}。` : "还没从云端读取 Bot 列表（会唤醒休眠的云端电脑，要几秒）。"}勾选并保存后，到<a href="#calls">呼名</a>页给它配称呼，设备上才叫得到。</p>
+      <p class="muted small" style="margin:0 0 4px">${bots ? `列表读取于 ${esc(fmt(d.bots_at))}。` : "还没从云端读取 Bot 列表（会唤醒休眠的云端电脑，要几秒）。"}勾选保存后自动用 Bot 的名字做称呼；想改写法、或按你的发音录入，到<a href="#calls">呼名</a>页。名字含空格标点、或已被别的模型占用时不会自动配，要到呼名页手动加。</p>
       ${list.length ? list.map((b) => `<label class="switch" style="margin-top:8px"><input type="checkbox" data-bot="${esc(b.id)}" data-name="${esc(b.name)}" ${checked.has(b.id) ? "checked" : ""}>
           <span>${esc(b.name)}${b.busy ? ' <span class="pill">忙</span>' : ""}${checked.has(b.id) ? (aliasesOf(b.id).length ? ` <span class="pill ok">称呼：${esc(aliasesOf(b.id).join("、"))}</span>` : ' <span class="pill warn">还没配称呼</span>') : ""}</span>
           <small>${esc(b.preview || "")}</small></label>`).join("") : '<p class="muted" style="margin:8px 0 0">没有 Bot。先在 Grok Bot App 里创建，再点“重新读取”。</p>'}

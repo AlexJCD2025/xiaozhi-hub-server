@@ -120,6 +120,7 @@ def describe_llm(merged: dict) -> dict:
     selected = _selected(merged, "LLM")
     kind = llm_kind(merged, selected)
     vendor = catalog.VENDOR_BY_ENTRY.get(selected) if kind == "api" else None
+    calls = describe_call_names(merged)
     return {
         "selected": selected,
         "kind": kind,
@@ -128,6 +129,9 @@ def describe_llm(merged: dict) -> dict:
         "vendors": [describe_vendor(v, merged) for v in catalog.LLM_VENDORS],
         "grok": {"bots": grok_entries(merged),
                  "selected": next((g for g in grok_entries(merged) if g["entry"] == selected), None)},
+        # 配了称呼的模型都能叫到，"默认"只是设备刚连上时用的那个；页面据此标出每个模型的称呼
+        "call_names_enabled": calls["enabled"],
+        "callable": {m["entry"]: m["aliases"] for m in calls["models"] if m["aliases"]},
     }
 
 
@@ -167,10 +171,23 @@ def describe_grok_bot(merged: dict) -> dict:
     return {"entries": bots, "default": _selected(merged, "LLM")}
 
 
+def _default_grok_alias(bot_name: str, taken: set) -> str:
+    """新勾选的 Bot 自动用它的名字做称呼（呼名页可改）；名字不能当称呼（有空格标点、太长、被占用）时不加。"""
+    from core.agent import call_names
+
+    alias = (bot_name or "").strip().lower()
+    if not alias or ALIAS_BAD.search(alias) or not 2 <= len(alias) <= 20 or alias in call_names._PREFIXES or alias in taken:
+        return ""
+    return alias
+
+
 def save_grok_bots(payload: dict, merged: dict, path: Path = None) -> list:
-    """按 payload["bots"]（[{"id", "name"}]）同步条目：新勾选的建条目，取消的删条目（连同它的称呼）。
+    """按 payload["bots"]（[{"id", "name"}]）同步条目：新勾选的建条目并自动配上 Bot 名字作称呼，
+    取消的删条目（连同它的称呼）。
 
     返回修改了的条目名。正在作为默认模型使用的 Bot 不能取消。"""
+    from core.agent import call_names
+
     raw = payload.get("bots")
     if not isinstance(raw, list):
         raise ValueError("Bot 列表格式不对")
@@ -186,6 +203,9 @@ def save_grok_bots(payload: dict, merged: dict, path: Path = None) -> list:
     taken = {g["entry"]: g["bot_id"] for g in grok_entries(merged)}
     taken.update({name: "" for name in (merged.get("LLM") or {}) if name not in taken})
     selected = _selected(merged, "LLM")
+    cn_cfg = merged.get("call_names") or {}
+    effective_models = {str(k): call_names._aliases(v) for k, v in (cn_cfg.get("models") or call_names.DEFAULT_MODELS).items()}
+    taken_aliases = {a for aliases in effective_models.values() for a in aliases}
     changed = []
     with config_store.edit_custom(path) as data:
         llm = data.setdefault("LLM", CommentedMap())
@@ -203,6 +223,16 @@ def save_grok_bots(payload: dict, merged: dict, path: Path = None) -> list:
             block["bot_id"] = bot_id
             block["bot_name"] = name
             changed.append(entry_name)
+            alias = _default_grok_alias(name, taken_aliases) if not old else ""
+            if alias:
+                # 自定义文件里还没有称呼表时，先把当前生效的（默认只有 Claude）抄进去，再加这个 Bot
+                cn = data.setdefault("call_names", CommentedMap())
+                models = cn.get("models")
+                if not isinstance(models, CommentedMap):
+                    models = CommentedMap((k, CommentedSeq(v)) for k, v in effective_models.items())
+                    cn["models"] = models
+                models[entry_name] = CommentedSeq([alias])
+                taken_aliases.add(alias)
         for bot_id, old in current.items():
             if bot_id in wanted:
                 continue

@@ -57,7 +57,11 @@ def test_save_grok_bots_creates_updates_removes(cfg_path):
     assert m["LLM"]["GrokBot_孙悟空"] == {"type": "grok_bot", "bot_id": "id-wukong", "bot_name": "孙悟空"}
     assert m["LLM"]["GrokBot_林黛玉"]["bot_name"] == "林 黛玉!"
     d = pages.describe_grok_bot(m)
-    assert [e["bot_id"] for e in d["entries"]] == ["id-wukong", "id-daiyu"] and d["entries"][0]["aliases"] == []
+    assert [e["bot_id"] for e in d["entries"]] == ["id-wukong", "id-daiyu"]
+    # 新勾选的 Bot 自动用名字做称呼；"林 黛玉!" 有空格标点，不能当称呼
+    assert d["entries"][0]["aliases"] == ["孙悟空"] and d["entries"][1]["aliases"] == []
+    assert m["call_names"]["models"]["ClaudeCLI"] == ["claude", "cloud"]  # 原有的称呼不受影响
+    assert pages.describe_llm(m)["callable"] == {"ClaudeCLI": ["claude", "cloud"], "GrokBot_孙悟空": ["孙悟空"]}
     # 没变化
     assert pages.save_grok_bots({"bots": bots}, m, cfg_path) == []
     # 改名：条目名不变，bot_name 更新
@@ -77,10 +81,25 @@ def test_save_grok_bots_name_collision_and_validation(cfg_path):
     bots = [{"id": "id-1", "name": "小助手"}, {"id": "id-2", "name": "小 助手"}]
     changed = pages.save_grok_bots({"bots": bots}, merged(cfg_path), cfg_path)
     assert "GrokBot_小助手" in changed and "GrokBot_小助手_id-2" in changed
+    # 称呼"小助手"给了第一个；第二个的名字带空格，不自动配
+    assert merged(cfg_path)["call_names"]["models"].get("GrokBot_小助手") == ["小助手"]
+    assert "GrokBot_小助手_id-2" not in merged(cfg_path)["call_names"]["models"]
+    # 名字和已有称呼撞了：不自动配
+    pages.save_grok_bots({"bots": [{"id": "id-1", "name": "小助手"}, {"id": "id-2", "name": "小 助手"}, {"id": "id-3", "name": "Claude"}]},
+                         merged(cfg_path), cfg_path)
+    assert "GrokBot_Claude" not in merged(cfg_path)["call_names"]["models"]
     with pytest.raises(ValueError):
         pages.save_grok_bots({"bots": "x"}, merged(cfg_path), cfg_path)
     with pytest.raises(ValueError):
         pages.save_grok_bots({"bots": [{"name": "没有id"}]}, merged(cfg_path), cfg_path)
+
+
+def test_auto_alias_when_no_call_names_section(tmp_path):
+    p = tmp_path / ".config.yaml"
+    p.write_text("selected_module:\n  LLM: ClaudeCLI\nLLM:\n  ClaudeCLI:\n    type: claude_cli\n", encoding="utf-8")
+    pages.save_grok_bots({"bots": [{"id": "id-1", "name": "孙悟空"}]}, merged(p), p)
+    models = merged(p)["call_names"]["models"]
+    assert models["GrokBot_孙悟空"] == ["孙悟空"] and models["ClaudeCLI"] == ["claude", "cloud", "clod", "clot", "克劳德"]
 
 
 def test_cannot_remove_default_model(cfg_path):
