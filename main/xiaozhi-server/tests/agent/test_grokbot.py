@@ -629,3 +629,93 @@ def test_voice_messages_cover_kinds():
     for kind in (ErrorKind.AUTH, ErrorKind.SERVER, ErrorKind.TIMEOUT, ErrorKind.STALLED, ErrorKind.PROCESS_EXITED):
         assert "Grok Bot" in gs.voice_for(kind)
     assert gs.voice_for(ErrorKind.NOT_INSTALLED) == gs.VOICE_MESSAGES[ErrorKind.UNKNOWN]
+
+
+# ---------- review 后补的用例 ----------
+
+async def test_updated_entry_growth_speaks_only_the_new_part(cloud, hub):
+    s = GrokBotSession(hub, cfg())
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("第一段")})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "updated", "entry": reply_entry("第一段。第二段。")})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "updated", "entry": reply_entry("改写了")})  # 不是追加：不念
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == ["第一段。", "第二段。"] and isinstance(evs[-1], Done)
+    await s.close()
+
+
+async def test_waiting_ends_turn_even_if_bot_still_busy(cloud, hub):
+    s = GrokBotSession(hub, cfg())
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True, "awaitingUserResponse": {"kind": "question"}}})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == [gs.WAITING_NOTICE] and isinstance(evs[-1], Done)
+    await s.close()
+
+
+async def test_idle_before_first_reply_waits_for_late_message(cloud, hub):
+    """服务端托管的 Bot 先变空闲、再追加最后一条消息：空闲后一条都没念过就多等几秒。"""
+    s = GrokBotSession(hub, cfg(first_reply_grace=1.0))
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+        await real_sleep(0.5)  # 超过 done_delay（0.15）但没超过 first_reply_grace
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("迟到的回复。")})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == ["迟到的回复。"] and isinstance(evs[-1], Done)
+    await s.close()
+
+
+async def test_hub_wait_connected(cloud, hub):
+    assert hub.connected is False
+    sub = hub.subscribe("bot-1")
+    assert await hub.wait_connected(2) is True and hub.connected
+    sub.close()
+
+
+async def test_hub_backs_off_a_minute_when_not_logged_in(cloud, tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "AUTH_RETRY", 0.05)
+    client = GrokBotClient(Credentials(tmp_path / "none.json"), backend=cloud.url)
+    h = GrokBotHub(client)
+    sub = h.subscribe("bot-1")
+    await real_sleep(0.3)
+    assert h.connected is False and h._task is not None and not h._task.done()  # 一直在重试，但没有连上
+    sub.close()
+    await h.close()
+
+
+def test_provider_slow_start_is_not_a_stall(provider, tmp_path, monkeypatch):
+    """云端电脑唤醒要几十秒：会话启动期间没有事件，不能被当成卡住。"""
+    monkeypatch.setattr(grok_mod, "get_hub", lambda *a, **k: None)
+    p = grok_mod.LLMProvider({"bot_id": "bot-1", "bot_name": "孙悟空", "credentials_path": str(tmp_path / "c.json"),
+                              "stall_timeout_seconds": 0.3, "first_reply_filler": "", "turn_timeout_seconds": 5})
+    p.store = SessionStore(tmp_path / "s3.json", "grok_bot")
+
+    async def slow_start(self):
+        await real_sleep(0.8)
+        self.alive = True
+
+    monkeypatch.setattr(FakeGrokAgent, "start", slow_start)
+    c = conn()
+    p.on_conn_open(c)
+    assert run(p, c, "你好") == "收到。"

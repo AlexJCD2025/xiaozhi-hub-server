@@ -100,6 +100,9 @@ class GrokBotAdmin:
         except GrokBotError as e:
             self._result = {"ok": False, "note": f"登录失败：{e.detail}", "at": time.time()}
             self._log("warning", f"Grok Bot 登录失败：{e.detail}")
+        except Exception as e:  # noqa: BLE001 —— 后台任务，出错要让页面看得到
+            self._result = {"ok": False, "note": f"登录出错：{e!r}", "at": time.time()}
+            self._log("error", f"Grok Bot 登录出错：{e!r}")
 
     async def cancel_login(self) -> None:
         task, self._task = self._task, None

@@ -20,8 +20,8 @@ from typing import Optional
 
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
-from core.agent.agent_session import AgentSessionError, ErrorKind
-from core.agent.grokbot_client import Credentials, GrokBotError, default_credentials_path, get_hub
+from core.agent.agent_session import Activity, AgentSessionError, ErrorKind
+from core.agent.grokbot_client import Credentials, default_credentials_path, get_hub
 from core.agent.grokbot_session import GrokBotSession, GrokBotSessionConfig, voice_for
 from core.agent.session_store import SessionStore
 from core.providers.llm.claude_cli.claude_cli import ConnState, LLMProvider as AgentProvider, _num
@@ -113,6 +113,9 @@ class LLMProvider(AgentProvider):
         hub = get_hub(self.cred_path, logger=logger.bind(tag=TAG), backend=self.backend)
         agent = GrokBotSession(hub, self.session_config, logger=logger.bind(tag=TAG))
         t0 = time.time()
+        # 云端电脑休眠时唤醒要几十秒，期间没有任何事件：先报一次"还没开始干活"的 Activity（tools_running=1），
+        # 否则 response() 会在 stall_timeout（默认 30 秒）后把这段等待当成卡住
+        out.put(Activity("init", tools_running=1))
         await agent.start()
         if st.closed:
             await agent.close()  # 启动期间连接已经关闭

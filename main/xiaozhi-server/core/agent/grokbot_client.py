@@ -43,6 +43,7 @@ WAKE_TIMEOUT = 180  # 云端电脑休眠时最多等多久醒来
 WAKE_POLL = 3  # 唤醒期间每隔多久问一次就绪了没
 STREAM_READ_TIMEOUT = 45  # 事件流每 15 秒一个 ping，45 秒没字节就当断了
 STREAM_BACKOFF = (1, 2, 4, 8, 10)
+AUTH_RETRY = 60  # 登录失效时事件流多久再试一次
 
 
 class GrokBotError(Exception):
@@ -478,10 +479,28 @@ class GrokBotHub:
         self.logger = logger
         self.generation = 0
         self.connected = False
+        self._connected_event = asyncio.Event()
         self._subs: List[Subscription] = []
         self._task: Optional[asyncio.Task] = None
         self._idle_handle: Optional[asyncio.TimerHandle] = None
         self._stream_closed: Optional[asyncio.Event] = None  # 当前这条流需要被放弃时置位
+
+    def _set_connected(self, value: bool) -> None:
+        self.connected = value
+        if value:
+            self._connected_event.set()
+        else:
+            self._connected_event.clear()
+
+    async def wait_connected(self, timeout: float) -> bool:
+        """等事件流连上（最多 timeout 秒）。发送前先等一下，免得回显等早期事件在连上之前漏掉。"""
+        if self.connected:
+            return True
+        try:
+            await asyncio.wait_for(self._connected_event.wait(), timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     def _log(self, level: str, msg: str) -> None:
         if self.logger:
@@ -510,7 +529,7 @@ class GrokBotHub:
             self._log("info", f"事件流空闲 {int(self.idle_seconds)} 秒，关闭")
             self._task.cancel()
             self._task = None
-            self.connected = False
+            self._set_connected(False)
 
     def reconnect(self) -> None:
         """放弃当前这条流（例如一直收不到事件），马上重连。"""
@@ -528,7 +547,7 @@ class GrokBotHub:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
-        self.connected = False
+        self._set_connected(False)
         await self.client.close()
 
     def _dispatch(self, channel: str, payload: dict) -> None:
@@ -555,7 +574,7 @@ class GrokBotHub:
                 nonlocal fails
                 fails = 0
                 self.generation += 1
-                self.connected = True
+                self._set_connected(True)
                 self._log("debug", f"事件流已连接（第 {self.generation} 次）")
                 self._broadcast("hub-connected", {"generation": self.generation})
 
@@ -571,14 +590,15 @@ class GrokBotHub:
             except asyncio.CancelledError:
                 raise
             except GrokBotError as e:
-                self.connected = False
-                delay = STREAM_BACKOFF[min(fails, len(STREAM_BACKOFF) - 1)]
+                self._set_connected(False)
+                # 没登录、登录失效：重连也没用，等用户在后台重新登录，放慢到 1 分钟一次
+                delay = AUTH_RETRY if e.kind == ErrorKind.AUTH else STREAM_BACKOFF[min(fails, len(STREAM_BACKOFF) - 1)]
                 fails += 1
                 self._log("warning", f"事件流：{e.detail}，{delay} 秒后重连")
                 await _sleep(delay)
                 continue
             except Exception as e:  # noqa: BLE001 —— 常驻任务，任何意外都重连
-                self.connected = False
+                self._set_connected(False)
                 delay = STREAM_BACKOFF[min(fails, len(STREAM_BACKOFF) - 1)]
                 fails += 1
                 self._log("warning", f"事件流出错：{e!r}，{delay} 秒后重连")
@@ -592,7 +612,7 @@ class GrokBotHub:
                             await t
                         except (asyncio.CancelledError, Exception):
                             pass
-            self.connected = False
+            self._set_connected(False)
 
 
 # 按凭证文件共享的中枢：同一个账号的多个 Bot（多个 provider 实例）只开一条事件流

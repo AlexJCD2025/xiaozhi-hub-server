@@ -50,7 +50,9 @@ class GrokBotSessionConfig:
     echo_timeout: float = 10  # 发送后这么久没在事件流里看到回显，就重连并补拉
     poll_interval: float = 12  # 等回复期间轮询对话尾部的间隔
     done_delay: float = 1.5  # Bot 空闲后再等这么久没新动静才算本轮结束
+    first_reply_grace: float = 5  # Bot 忙过又空闲了、却一条回复都还没来：多等一会儿（服务端托管的 Bot 先空闲再追加最后一条）
     no_reply_timeout: float = 90  # 消息送到了、Bot 一直空闲又没回话，这么久后结束本轮
+    connect_wait: float = 3  # 发送前最多等事件流连上这么久
     tail_limit: int = 20
 
 
@@ -159,6 +161,7 @@ class GrokBotSession(AgentSession):
         queue = self._sub.queue
         nonce = str(uuid.uuid4())
         seen: Dict[str, str] = {}  # 条目 id -> 已播报的文字；发送前已有的条目也记在这里（值为空）
+        raw: Dict[str, str] = {}  # 已播报条目的纯文字（没补句号），条目被更新、文字变长时只念多出来的部分
         t0 = time.monotonic()
         state = {"echoed": False, "busy": False, "was_busy": False, "idle_since": None, "spoken": 0,
                  "generation": self.hub.generation, "newest": None, "waiting": False, "recovered": False}
@@ -176,6 +179,9 @@ class GrokBotSession(AgentSession):
             if e.kind == ErrorKind.AUTH:
                 yield Error(e.kind, e.detail, voice=voice_for(e.kind))
                 return
+
+        if not self.hub.connected and not await self.hub.wait_connected(cfg.connect_wait):
+            self._log("warning", f"事件流 {cfg.connect_wait} 秒内没连上，先发送，靠补拉和轮询兜底")
 
         try:
             res = await client.send_prompt(bot_id, text, nonce)
@@ -211,9 +217,20 @@ class GrokBotSession(AgentSession):
                     self._log("info", f"+{time.monotonic() - t0:.1f}s 消息已出现在对话里")
                 seen.setdefault(entry_id, "")
                 return []
-            if entry_id in seen:
-                return []
             content = reply_text(entry)
+            if entry_id in seen:
+                # 已经念过的条目被更新：文字在原来基础上变长（流式追加）就只念多出来的部分，别的改动不管
+                old = raw.get(entry_id)
+                new = plain_text(content) if content is not None else ""
+                if old is None or len(new) <= len(old) or not new.startswith(old):
+                    return []
+                raw[entry_id] = new
+                extra = spoken_form(new[len(old):].lstrip("。.！!？?；;，,、 \n"))  # 上一段已经补过句号
+                if not extra:
+                    return []
+                state["idle_since"] = None if state["busy"] else time.monotonic()
+                self._log("info", f"+{time.monotonic() - t0:.1f}s 回复追加：{extra[:80]}")
+                return [TextDelta(extra)]
             if content is None:
                 seen[entry_id] = ""
                 return []
@@ -221,6 +238,7 @@ class GrokBotSession(AgentSession):
             seen[entry_id] = spoken
             if not spoken:
                 return []
+            raw[entry_id] = plain_text(content)
             state["spoken"] += 1
             state["idle_since"] = None if state["busy"] else time.monotonic()
             self._log("info", f"+{time.monotonic() - t0:.1f}s 回复：{spoken[:80]}")
@@ -266,11 +284,14 @@ class GrokBotSession(AgentSession):
                     return
                 now = time.monotonic()
                 idle_pending = state["idle_since"] is not None and (state["was_busy"] or state["spoken"])
-                if idle_pending and now - state["idle_since"] >= cfg.done_delay:
+                # 忙过却一条回复都没来：多等几秒，服务端托管的 Bot 会先变空闲、再追加最后一条消息
+                idle_wait = cfg.done_delay if state["spoken"] else max(cfg.done_delay, cfg.first_reply_grace)
+                if idle_pending and now - state["idle_since"] >= idle_wait:
                     self._log("info", f"+{now - t0:.1f}s 本轮结束，共 {state['spoken']} 条回复")
                     yield Done(session_id=bot_id)
                     return
-                if state["waiting"] and not state["busy"]:
+                if state["waiting"]:
+                    # Bot 在等用户去 App 里处理：这一轮到此为止，不管它的忙闲标志
                     yield Done(session_id=bot_id)
                     return
                 if state["echoed"] and not state["busy"] and not state["was_busy"] and not state["spoken"] \
@@ -282,7 +303,7 @@ class GrokBotSession(AgentSession):
 
                 waits = [next_poll - now]
                 if idle_pending:
-                    waits.append(state["idle_since"] + cfg.done_delay - now)
+                    waits.append(state["idle_since"] + idle_wait - now)
                 if not state["echoed"] and not state["recovered"]:
                     waits.append(t0 + cfg.echo_timeout - now)
                 try:
