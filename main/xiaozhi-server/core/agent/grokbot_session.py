@@ -415,9 +415,11 @@ class GrokBotSession(AgentSession):
 
         yield Activity("sent", tools_running=1)
         try:
+            finished = False
             async for ev in self._follow(tracker, queue, lambda: self._interrupted):
+                finished = finished or isinstance(ev, Done)
                 yield ev
-            if self._interrupted:
+            if self._interrupted and not finished:
                 self._log("info", "本轮被打断，停止播报（云端继续做，做完再汇报）")
                 self._start_watch(tracker)
                 yield Done(session_id=bot_id, interrupted=True)
@@ -425,6 +427,11 @@ class GrokBotSession(AgentSession):
             yield Error(e.kind, e.detail, voice=voice_for(e.kind))
         except GrokBotError as e:
             yield Error(e.kind, e.detail, voice=voice_for(e.kind))
+
+
+# 正在后台盯着的任务。asyncio 对任务只有弱引用，会话被关掉、对象被回收后任务会被当垃圾清掉，这里保住它们
+_watches = set()
+NOTICES = (WAITING_NOTICE, NO_REPLY_NOTICE)
 
 
 class AfterWatch:
@@ -442,6 +449,7 @@ class AfterWatch:
         self.sub = self.session.hub.subscribe(self.session.config.bot_id)
         self.tracker.generation = self.session.hub.generation
         self.task = asyncio.ensure_future(self._run())
+        _watches.add(self)
         self.session._log("info", f"后台盯着它，最多 {int(self.session.config.watch_max // 60)} 分钟")
 
     async def _run(self) -> None:
@@ -457,6 +465,7 @@ class AfterWatch:
         finally:
             if self.sub is not None:
                 self.sub.close()
+            _watches.discard(self)
         self._report()
 
     def _report(self) -> None:
@@ -464,7 +473,7 @@ class AfterWatch:
             return
         self.done = True
         name = self.session.config.bot_name or "Grok Bot"
-        texts, self.texts = [t for t in self.texts if t != WAITING_NOTICE], []  # 交出去就清空，下一轮不再重复念
+        texts, self.texts = [t for t in self.texts if t not in NOTICES], []  # 交出去就清空，下一轮不再重复念
         if self.tracker.waiting:
             text = f"{name}在等你去 App 里处理。"
         elif texts:
@@ -483,7 +492,7 @@ class AfterWatch:
         self.done = True
         if self.task is not None and not self.task.done():
             self.task.cancel()
-        texts, self.texts = [t for t in self.texts if t != WAITING_NOTICE], []
+        texts, self.texts = [t for t in self.texts if t not in NOTICES], []
         if not texts:
             return ""
         name = self.session.config.bot_name or "Grok Bot"
