@@ -543,7 +543,7 @@ function renderDevices(dev) {
     box.innerHTML = '<div class="panel muted">暂无设备在线。唤醒设备后会自动出现在这里。</div>';
     return;
   }
-  const key = JSON.stringify(dev.devices.map((d) => [d.session_id, d.emotion_test, openEmotion.has(d.session_id)]));
+  const key = JSON.stringify(dev.devices.map((d) => [d.session_id, d.model_label, d.emotion_test, openEmotion.has(d.session_id)]));  // 设备切了模型也要重绘
   if (box.dataset.key === key) {  // 只更新连接时长，避免重绘打断点击
     box.querySelectorAll("[data-since]").forEach((el) => (el.textContent = duration(dev.now - +el.dataset.since)));
     return;
