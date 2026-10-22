@@ -554,6 +554,8 @@ class FakeGrokAgent:
 
 @pytest.fixture
 def provider(tmp_path, monkeypatch):
+    from core.agent import reports as _reports
+    _reports.clear()  # 别的测试文件可能留下待汇报
     FakeGrokAgent.instances, FakeGrokAgent.script, FakeGrokAgent.start_error, FakeGrokAgent.delay = [], [], None, 0.0
     monkeypatch.setattr(grok_mod, "GrokBotSession", FakeGrokAgent)
     monkeypatch.setattr(grok_mod, "get_hub", lambda *a, **k: SimpleNamespace(name="hub"))

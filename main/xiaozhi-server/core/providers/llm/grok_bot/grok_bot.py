@@ -34,7 +34,7 @@ logger = setup_logging()
 DEFAULT_FILLER = "交给 Grok Bot 了"
 DEFAULT_FILLER_DELAY = 4  # 简单问题 3–5 秒就回，等久一点再说填充语，免得每句都念一遍
 # 附在每句话后面：Bot 的回复是给屏幕看的，不提示会写一大段列表。会出现在 App 的对话里，配置里填空字符串可关掉
-DEFAULT_VOICE_HINT = "请用口语化的一两句话回答，不要用列表、表格和代码"
+DEFAULT_VOICE_HINT = "回复会被语音朗读：请口语化、尽量简短，不要用列表、表格和代码"
 
 _shared = {"loop": None, "thread": None}
 _shared_lock = threading.Lock()

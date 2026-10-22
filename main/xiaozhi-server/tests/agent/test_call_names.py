@@ -230,3 +230,19 @@ async def test_only_call_name_speaks_pending_report_of_grok_bot(spoken):
     assert not reports.pending("dev-1")
     assert await handle_call_name(c, "嗨 孙悟空") is None
     assert spoken["tts"][-1] == call_names.DEFAULT_REPLY  # 念过就没有了
+
+
+async def test_pending_report_put_back_when_tts_not_ready(spoken, monkeypatch):
+    from core.agent import reports
+
+    reports.clear()
+    c = make_conn({"models": {"GrokBot_孙悟空": ["孙悟空"]}})
+    c.config["LLM"] = {"GrokBot_孙悟空": {"type": "grok_bot", "bot_id": "bot-1", "bot_name": "孙悟空"}}
+    c.session_id, c.device_id = "s-1", "dev-1"
+    c.tts = None  # TTS 还没就绪，念不了
+    clock = iter(range(100))
+    monkeypatch.setattr(call_names.time, "monotonic", lambda: next(clock))
+    reports.add("dev-1", "bot-1", "孙悟空做完了：好。")
+    assert await handle_call_name(c, "嗨 孙悟空") == "嗨 孙悟空"
+    assert spoken["tts"] == [] and reports.pending("dev-1", "bot-1")  # 没念成，放回去了
+    reports.clear()
