@@ -158,6 +158,7 @@ def speak(conn, text: str) -> None:
 
     conn.client_abort = False
     conn.sentence_id = str(uuid.uuid4().hex)
+    conn.client_is_speaking = True  # 和一轮对话一样：播完 TTS 会清掉；期间再来的待汇报等着，不会截断这条
     conn.logger.bind(tag=TAG).info(f"播报待汇报：{text[:80]}")
     speak_txt(conn, text)
 

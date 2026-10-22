@@ -101,8 +101,9 @@ def collect_status(config: dict, merged: dict) -> dict:
                                  "登录已失效，请到 Grok Bot 页重新登录" if st["needs_login"] else "还没登录，请到 Grok Bot 页登录"))
         else:
             days = int((st["expires_at"] - time.time()) / 86400)
-            checks.append(_check("Grok Bot", True, f"已登录，{len(grok)} 个 Bot，登录有效期还有 {days} 天",
-                                 level="warn" if days < 3 else "ok"))
+            detail = (f"已登录，{len(grok)} 个 Bot，登录有效期还有 {days} 天" if days >= 0
+                      else f"已登录，{len(grok)} 个 Bot，下次使用时自动续期")
+            checks.append(_check("Grok Bot", True, detail, level="warn" if 0 <= days < 3 else "ok"))
 
     return {
         "addresses": {

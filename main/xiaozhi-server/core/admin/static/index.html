@@ -1238,6 +1238,7 @@ async function renderGrokBot(root) {
   const acc = d.account, login = d.login, entries = d.entries, bots = d.bots;
   const fmt = (t) => (t ? new Date(t * 1000).toLocaleString() : "");
   const days = acc.expires_at ? Math.floor((acc.expires_at * 1000 - Date.now()) / 86400000) : 0;
+  const stillHere = () => page.name === "grokbot";  // 读取 Bot 列表可能要等几分钟，用户离开了就别把页面拉回来
   const checked = new Set(entries.map((e) => e.bot_id));
   const aliasesOf = (id) => ((entries.find((e) => e.bot_id === id) || {}).aliases || []);
   // 还没从云端读过列表时，先列出已勾选的
@@ -1252,7 +1253,7 @@ async function renderGrokBot(root) {
         <div class="kv"><div class="k">登录地址</div><code style="word-break:break-all">${esc(login.url)}</code><button class="btn sm copy" data-copy="${esc(login.url)}">复制</button></div>
         <div class="actions"><a class="btn" href="${esc(login.url)}" target="_blank" rel="noopener">打开登录页</a><button class="btn" id="gb-cancel">取消</button></div>`
       : `${login.result && !login.result.ok ? `<div class="banner err">${esc(login.result.note)}</div>` : ""}
-        ${acc.logged_in ? `<p style="margin:0 0 12px">已登录，登录有效期还有 ${days} 天（到 ${esc(fmt(acc.expires_at))}）。快到期时会自动续期；续期失败这里会提示重新登录。</p>`
+        ${acc.logged_in ? `<p style="margin:0 0 12px">${days >= 0 ? `已登录，登录有效期还有 ${days} 天（到 ${esc(fmt(acc.expires_at))}）。快到期时会自动续期` : "已登录，下次使用时会自动续期"}；续期失败这里会提示重新登录。</p>`
           : acc.needs_login ? '<p style="margin:0 0 12px">登录已失效（服务端要求重新登录），请重新登录。</p>'
           : '<p style="margin:0 0 12px">还没登录。点“登录”会给出一个 Cursor 的登录地址，在浏览器里批准即可，不需要在这里输入密码。</p>'}
         <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="gb-login">${acc.logged_in ? "重新登录" : "登录"}</button>
@@ -1271,16 +1272,16 @@ async function renderGrokBot(root) {
     </div>`;
   root.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
   if ($("gb-login")) $("gb-login").onclick = (e) => busy(e.target, async () => {
-    try { const r = await api("grokbot/login", {}); window.open(r.url, "_blank", "noopener"); await openPage("grokbot", true); }
+    try { const r = await api("grokbot/login", {}); window.open(r.url, "_blank", "noopener"); if (stillHere()) await openPage("grokbot", true); }
     catch (err) { toast(err.message, true); }
   });
   if ($("gb-cancel")) $("gb-cancel").onclick = async () => { await api("grokbot/login/cancel", {}); await openPage("grokbot", true); };
   if ($("gb-logout")) $("gb-logout").onclick = async () => {
-    if (!confirm("退出登录会删除本机保存的凭证，设备上将叫不到 Grok Bot。确定吗？")) return;
+    if (!confirm("退出登录会删除本机保存的凭证，之后设备叫不到 Grok Bot（正在进行的对话会做完）。确定吗？")) return;
     await api("grokbot/logout", {}); await openPage("grokbot", true);
   };
   if ($("gb-refresh")) $("gb-refresh").onclick = (e) => busy(e.target, async () => {
-    try { await api("grokbot/bots/refresh", {}); await openPage("grokbot", true); } catch (err) { toast(err.message, true); }
+    try { await api("grokbot/bots/refresh", {}); if (stillHere()) await openPage("grokbot", true); } catch (err) { toast(err.message, true); }
   });
   if ($("gb-save")) $("gb-save").onclick = (e) => busy(e.target, async () => {
     const picked = [...root.querySelectorAll("[data-bot]:checked")].map((c) => ({ id: c.dataset.bot, name: c.dataset.name }));

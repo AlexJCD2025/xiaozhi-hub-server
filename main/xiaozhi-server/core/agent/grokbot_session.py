@@ -223,6 +223,7 @@ class GrokBotSession(AgentSession):
         self._sub: Optional[Subscription] = None
         self._interrupted = False
         self._started = False
+        self._in_turn = False
 
     @property
     def watch_key(self):
@@ -251,8 +252,13 @@ class GrokBotSession(AgentSession):
         self._started = True
 
     async def close(self) -> None:
-        """结束会话。后台盯着的任务不受影响，它有自己的订阅。"""
+        """结束会话（设备断开、空闲超时）。正在进行的一轮当作被打断：Bot 在云端继续做，转后台盯着，做完再汇报。
+        后台盯着的任务不受影响，它有自己的订阅。"""
         self._started = False
+        if self._in_turn:
+            self._interrupted = True
+            if self._sub is not None:
+                self._sub.queue.put_nowait(("interrupt", {}))
         sub, self._sub = self._sub, None
         if sub is not None:
             sub.close()
@@ -425,6 +431,7 @@ class GrokBotSession(AgentSession):
                 return
 
         yield Activity("sent", tools_running=1)
+        self._in_turn = True
         try:
             finished = False
             async for ev in self._follow(tracker, queue, lambda: self._interrupted):
@@ -434,10 +441,16 @@ class GrokBotSession(AgentSession):
                 self._log("info", "本轮被打断，停止播报（云端继续做，做完再汇报）")
                 self._start_watch(tracker)
                 yield Done(session_id=bot_id, interrupted=True)
+        except asyncio.CancelledError:
+            # 打断时正卡在慢请求里，被上层强制取消：一样转后台盯着
+            self._start_watch(tracker)
+            raise
         except AgentSessionError as e:
             yield Error(e.kind, e.detail, voice=voice_for(e.kind))
         except GrokBotError as e:
             yield Error(e.kind, e.detail, voice=voice_for(e.kind))
+        finally:
+            self._in_turn = False
 
 
 # 正在后台盯着的任务：(设备, Bot id) -> AfterWatch。asyncio 对任务只有弱引用，会话被关掉、对象被回收后任务会被
