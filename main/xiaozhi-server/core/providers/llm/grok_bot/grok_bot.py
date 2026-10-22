@@ -22,7 +22,7 @@ from pathlib import Path
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
 from core.agent import reports
-from core.agent.agent_session import Activity, AgentSessionError, ErrorKind, TextDelta
+from core.agent.agent_session import Activity, AgentSessionError, Done, ErrorKind, TextDelta
 from core.agent.grokbot_client import Credentials, default_credentials_path, get_hub
 from core.agent.grokbot_session import GrokBotSession, GrokBotSessionConfig, voice_for
 from core.agent.session_store import SessionStore
@@ -114,7 +114,14 @@ class LLMProvider(AgentProvider):
         hub = get_hub(self.cred_path, logger=logger.bind(tag=TAG), backend=self.backend)
         key = st.key
         return GrokBotSession(hub, self.session_config, logger=logger.bind(tag=TAG),
-                              on_report=lambda text: reports.add(key, self.bot_id, text))
+                              on_report=lambda text: reports.add(key, self.bot_id, text), device_key=key)
+
+    def abort(self, conn) -> None:
+        """设备打断。会话还在启动（云端电脑唤醒要几十秒）时父类无事可做，这里记下来：启动完也不发这句话了。"""
+        st = self._states.get(conn.session_id)
+        if st is not None:
+            st.abort_gen = st.turn_gen
+        super().abort(conn)
 
     def on_conn_open(self, conn) -> None:
         """设备叫到这个 Bot（或重连时沿用它）：提前把云端电脑叫醒、连上事件流，第一句话就不用等了。"""
@@ -144,7 +151,9 @@ class LLMProvider(AgentProvider):
             return
         st.agent = agent
         logger.bind(tag=TAG).info(f"Grok Bot「{self.bot_name}」已提前就绪（{time.time() - t0:.1f}s），设备 {st.key}")
-        if st.lock is None or not st.lock.locked():
+        if st.lock is None:
+            st.lock = asyncio.Lock()  # 空闲关闭要拿这把锁；还没有过任何一轮时它是 None
+        if not st.lock.locked():
             self._schedule_idle_close(st)
 
     async def _ensure_agent(self, st: ConnState, text: str, out, system_prompt: str) -> bool:
@@ -161,19 +170,23 @@ class LLMProvider(AgentProvider):
                 await warm
             except Exception:  # noqa: BLE001 —— 热身失败下面照常自己启动
                 pass
-        if st.agent and st.agent.alive:
-            return False
-        if not self.bot_id:
-            raise AgentSessionError(ErrorKind.UNKNOWN, "没有配置 bot_id")
-        agent = self._new_session(st)
-        t0 = time.time()
-        # 云端电脑休眠时唤醒要几十秒，期间没有任何事件：先报一次"还没开始干活"的 Activity（tools_running=1），
-        # 否则 response() 会在 stall_timeout（默认 30 秒）后把这段等待当成卡住
-        out.put(Activity("init", tools_running=1))
-        await agent.start()
-        if st.closed:
-            await agent.close()  # 启动期间连接已经关闭
-            raise AgentSessionError(ErrorKind.PROCESS_EXITED, "连接已关闭")
-        st.agent = agent
-        logger.bind(tag=TAG).info(f"Grok Bot「{self.bot_name}」会话已就绪（{time.time() - t0:.1f}s），设备 {st.key}")
+        if not (st.agent and st.agent.alive):
+            if not self.bot_id:
+                raise AgentSessionError(ErrorKind.UNKNOWN, "没有配置 bot_id")
+            agent = self._new_session(st)
+            t0 = time.time()
+            # 云端电脑休眠时唤醒要几十秒，期间没有任何事件：先报一次"还没开始干活"的 Activity（tools_running=1），
+            # 否则 response() 会在 stall_timeout（默认 30 秒）后把这段等待当成卡住
+            out.put(Activity("init", tools_running=1))
+            await agent.start()
+            if st.closed:
+                await agent.close()  # 启动期间连接已经关闭
+                raise AgentSessionError(ErrorKind.PROCESS_EXITED, "连接已关闭")
+            st.agent = agent
+            logger.bind(tag=TAG).info(f"Grok Bot「{self.bot_name}」会话已就绪（{time.time() - t0:.1f}s），设备 {st.key}")
+        if getattr(st, "abort_gen", None) == st.turn_gen:
+            # 等启动的这段时间里设备已经打断了：这句话不发了，否则回复没人听、锁还一直占着
+            logger.bind(tag=TAG).info(f"Grok Bot「{self.bot_name}」会话就绪前设备已打断，这句话不发")
+            out.put(Done(interrupted=True))
+            return True
         return False

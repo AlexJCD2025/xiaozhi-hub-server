@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import threading
 import base64
 import json
 import os
@@ -68,6 +69,8 @@ class FakeCloud:
         self.send_fail_once = False
         self.acceptance = {"status": "accepted"}
         self.hibernate_once = False
+        self.tail_fail = 0  # 接下来这么多次 getAgentTranscriptTail 返回 500
+        self.on_refresh = None  # 续期请求到达时先调它（模拟别处同时续期成功）
         self.events_q: asyncio.Queue = asyncio.Queue()
         self.stream_dead = False  # 连上了但什么都不推
         self.streams = 0
@@ -93,6 +96,8 @@ class FakeCloud:
 
     async def oauth_token(self, request):
         self.refresh_calls += 1
+        if self.on_refresh:
+            self.on_refresh()
         if self.refresh_logout:
             return web.json_response({"shouldLogout": True}, status=401)
         return web.json_response({"access_token": jwt(3600), "refresh_token": "r-2"})
@@ -130,6 +135,9 @@ class FakeCloud:
         return web.json_response(self.acceptance)
 
     async def tail(self, request):
+        if self.tail_fail > 0:
+            self.tail_fail -= 1
+            return web.Response(status=500, text="tail boom")
         body = await request.json()
         return web.json_response({"entries": self.entries[-int(body.get("limit", 10)):], "nextBeforeSeq": 0})
 
@@ -525,8 +533,8 @@ class FakeGrokAgent:
     start_error = None
     delay = 0.0
 
-    def __init__(self, hub, config, logger=None, on_report=None):
-        self.hub, self.config, self.on_report = hub, config, on_report
+    def __init__(self, hub, config, logger=None, on_report=None, device_key=""):
+        self.hub, self.config, self.on_report, self.device_key = hub, config, on_report, device_key
         self.session_id = config.bot_id
         self.alive = False
         self.sent, self.interrupts, self.closed = [], 0, False
@@ -810,7 +818,7 @@ async def test_new_send_takes_watch_prelude(cloud, hub):
     await collect(s)
     await task
     await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("查到一半。")})
-    await wait_until(lambda: s._watch is not None and s._watch.texts, timeout=3)
+    await wait_until(lambda: gs._watches.get(s.watch_key) is not None and gs._watches[s.watch_key].texts, timeout=3)
     # Bot 还在忙，用户又派新活：先念它刚才回的，之后的回复新的一轮自己念；后台任务停掉，不再汇报
     async def script2():
         await wait_until(lambda: len(cloud.sent) == 2)
@@ -822,7 +830,7 @@ async def test_new_send_takes_watch_prelude(cloud, hub):
     await task2
     assert texts(evs) == ["孙悟空刚才回了：查到一半。", "新活好了。"] and isinstance(evs[-1], Done)
     await real_sleep(0.3)
-    assert got == [] and s._watch is None
+    assert got == [] and s.watch_key not in gs._watches
     await s.close()
 
 
@@ -839,7 +847,7 @@ async def test_no_watch_when_turn_already_finished(cloud, hub):
     task = asyncio.ensure_future(script())
     evs = await collect(s)
     await task
-    assert texts(evs) == ["收到。"] and not evs[-1].interrupted and s._watch is None
+    assert texts(evs) == ["收到。"] and not evs[-1].interrupted and s.watch_key not in gs._watches
     await s.close()
 
 
@@ -930,3 +938,134 @@ async def test_reported_watch_is_not_spoken_again_as_prelude(cloud, hub):
     await task2
     assert texts(evs) == ["好。"]  # 没有"刚才回了：第一。"
     await s.close()
+
+
+# ---------- 独立 review 后补的用例 ----------
+
+async def test_watch_is_picked_up_by_new_session_after_close(cloud, hub):
+    """派活被打断 → 设备断开（会话关闭）→ 重连后对同一个 Bot 派新活：新会话要接上旧的后台任务，不能重复念。"""
+    s1, got = reporting_session(hub)
+    s1.device_key = "dev-1"
+    await s1.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s1.interrupt()
+
+    task = asyncio.ensure_future(script())
+    await collect(s1)
+    await task
+    await s1.close()  # 设备断开
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("查到一半。")})
+    await wait_until(lambda: gs._watches.get(("dev-1", "bot-1")) is not None and gs._watches[("dev-1", "bot-1")].texts, timeout=3)
+
+    s2 = GrokBotSession(hub, cfg(), on_report=got.append, device_key="dev-1")  # 重连后的新会话
+    await s2.start()
+
+    async def script2():
+        await wait_until(lambda: len(cloud.sent) == 2)
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("新活好了。", "e9")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task2 = asyncio.ensure_future(script2())
+    evs = await collect(s2, "第二件事")
+    await task2
+    assert texts(evs) == ["孙悟空刚才回了：查到一半。", "新活好了。"]
+    await real_sleep(0.3)
+    assert got == [] and ("dev-1", "bot-1") not in gs._watches  # 旧任务已停，不再汇报
+    await s2.close()
+
+
+async def test_baseline_tail_failure_does_not_send(cloud, hub):
+    cloud.tail_fail = 2
+    s = GrokBotSession(hub, cfg())
+    await s.start()
+    evs = await collect(s)
+    assert isinstance(evs[-1], Error) and evs[-1].kind == ErrorKind.SERVER and cloud.sent == []
+    cloud.tail_fail = 1  # 只失败一次：重试后照常发
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("好。")})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert texts(evs) == ["好。"]
+    await s.close()
+
+
+async def test_refresh_lost_race_uses_token_written_by_other_side(cloud, tmp_path):
+    creds = Credentials(tmp_path / "c.json")
+    creds.save({"accessToken": jwt(100), "refreshToken": "r-old"})
+    other = Credentials(tmp_path / "c.json")
+
+    def other_refreshed_first():
+        other.save({"accessToken": jwt(3600), "refreshToken": "r-new"})
+        os.utime(other.path, ns=(os.stat(other.path).st_atime_ns, os.stat(other.path).st_mtime_ns + 1))
+
+    cloud.on_refresh = other_refreshed_first
+    cloud.refresh_logout = True  # 我们这边拿旧 refresh token 去换，被拒
+    client = GrokBotClient(creds, backend=cloud.url)
+    await client.fresh_token()  # 不抛：发现文件里已有新 token
+    assert creds.refresh_token == "r-new" and not creds.needs_login
+    await client.close()
+
+
+def test_warm_up_then_idle_close_does_not_crash(tmp_path, monkeypatch):
+    """独立 review 发现：只呼名不派活，热身后到了空闲时间关闭会话时锁还是 None，直接崩，会话永远不关。"""
+    monkeypatch.setattr(grok_mod, "GrokBotSession", FakeGrokAgent)
+    monkeypatch.setattr(grok_mod, "get_hub", lambda *a, **k: None)
+    FakeGrokAgent.instances, FakeGrokAgent.script, FakeGrokAgent.start_error, FakeGrokAgent.delay = [], [], None, 0.0
+    p = grok_mod.LLMProvider({"bot_id": "bot-1", "bot_name": "孙悟空", "credentials_path": str(tmp_path / "c.json"),
+                              "idle_timeout_seconds": 0.3})
+    p.store = SessionStore(tmp_path / "s4.json", "grok_bot")
+    c = conn()
+    p.on_conn_open(c)
+    deadline = time.time() + 2
+    while time.time() < deadline and not (FakeGrokAgent.instances and FakeGrokAgent.instances[0].alive):
+        time.sleep(0.02)
+    assert FakeGrokAgent.instances[0].alive
+    time.sleep(0.8)
+    assert FakeGrokAgent.instances[0].closed and p._states[c.session_id].agent is None  # 空闲后关掉了
+
+
+def test_abort_during_slow_start_does_not_send(tmp_path, monkeypatch):
+    """独立 review 发现：云端电脑唤醒期间设备打断，这句话还是会发出去，回复没人听、锁一直占着。"""
+    monkeypatch.setattr(grok_mod, "GrokBotSession", FakeGrokAgent)
+    monkeypatch.setattr(grok_mod, "get_hub", lambda *a, **k: None)
+    FakeGrokAgent.instances, FakeGrokAgent.script, FakeGrokAgent.start_error, FakeGrokAgent.delay = [], [], None, 0.0
+
+    async def slow_start(self):
+        await real_sleep(0.6)
+        self.alive = True
+
+    monkeypatch.setattr(FakeGrokAgent, "start", slow_start)
+    p = grok_mod.LLMProvider({"bot_id": "bot-1", "bot_name": "孙悟空", "credentials_path": str(tmp_path / "c.json"),
+                              "first_reply_filler": ""})
+    p.store = SessionStore(tmp_path / "s5.json", "grok_bot")
+    c = conn()
+    c.client_abort = False
+    p.on_conn_open(c)
+    time.sleep(0.05)
+    out = []
+
+    def consume():
+        out.extend(p.response(c.session_id, [{"role": "user", "content": "派个活"}]))
+
+    t = threading.Thread(target=consume)
+    t.start()
+    time.sleep(0.2)
+    c.client_abort = True  # 设备打断
+    p.abort(c)
+    t.join(3)
+    assert out == []
+    deadline = time.time() + 2
+    while time.time() < deadline and not FakeGrokAgent.instances[0].alive:
+        time.sleep(0.02)
+    time.sleep(0.2)
+    assert FakeGrokAgent.instances[0].sent == []  # 启动完也没发
+    c.client_abort = False
+    assert run(p, c, "再来") == "收到。"  # 锁没被占着，下一句正常
+    assert FakeGrokAgent.instances[0].sent == ["再来"]

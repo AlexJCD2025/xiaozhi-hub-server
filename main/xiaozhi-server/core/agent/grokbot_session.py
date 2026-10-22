@@ -214,15 +214,19 @@ class Tracker:
 
 class GrokBotSession(AgentSession):
     def __init__(self, hub: GrokBotHub, config: GrokBotSessionConfig, logger=None,
-                 on_report: Callable[[str], None] = None):
+                 on_report: Callable[[str], None] = None, device_key: str = ""):
         self.hub = hub
         self.config = config
         self.logger = logger
         self.on_report = on_report  # 被打断后 Bot 做完了，把要念的话交给它（没有就不汇报）
+        self.device_key = device_key  # 后台盯着的任务按 (设备, Bot) 登记：会话关了再开，新会话也能接上它
         self._sub: Optional[Subscription] = None
         self._interrupted = False
         self._started = False
-        self._watch: Optional["AfterWatch"] = None
+
+    @property
+    def watch_key(self):
+        return (self.device_key, self.config.bot_id)
 
     @property
     def session_id(self) -> Optional[str]:
@@ -348,12 +352,16 @@ class GrokBotSession(AgentSession):
     def _start_watch(self, tracker: Tracker) -> None:
         if self.on_report is None or tracker.finished(time.monotonic()):
             return
-        self._watch = AfterWatch(self, tracker)
-        self._watch.start()
+        old = _watches.pop(self.watch_key, None)
+        if old is not None:
+            old.take()  # 同一设备同一 Bot 只盯一个（上一个的话已经在这一轮念过或进了箱子）
+        _watches[self.watch_key] = AfterWatch(self, tracker)
+        _watches[self.watch_key].start()
 
     def take_watch(self) -> str:
-        """新的一轮开始前：停掉后台盯着的任务，把它已经收到、还没汇报的话拿回来先念。"""
-        watch, self._watch = self._watch, None
+        """新的一轮开始前：停掉这台设备对这个 Bot 的后台盯着任务（哪怕是上一个会话留下的），
+        把它已经收到、还没汇报的话拿回来先念。"""
+        watch = _watches.pop(self.watch_key, None)
         return watch.take() if watch is not None else ""
 
     # ---------- 一轮对话 ----------
@@ -380,15 +388,18 @@ class GrokBotSession(AgentSession):
         while not queue.empty():
             queue.get_nowait()
 
-        try:
-            for e in await client.transcript_tail(bot_id, cfg.tail_limit):
-                if e.get("id"):
-                    seen[str(e["id"])] = ""
-        except GrokBotError as e:
-            self._log("warning", f"读对话尾部失败：{e.detail}")
-            if e.kind == ErrorKind.AUTH:
-                yield Error(e.kind, e.detail, voice=voice_for(e.kind))
-                return
+        # 不知道发送前对话里有什么，就分不清哪些回复是旧的：读不到尾部宁可不发
+        for attempt in (1, 2):
+            try:
+                for e in await client.transcript_tail(bot_id, cfg.tail_limit):
+                    if e.get("id"):
+                        seen[str(e["id"])] = ""
+                break
+            except GrokBotError as e:
+                self._log("warning", f"读对话尾部失败（第 {attempt} 次）：{e.detail}")
+                if e.kind == ErrorKind.AUTH or attempt == 2:
+                    yield Error(e.kind, e.detail, voice=voice_for(e.kind))
+                    return
 
         if not self.hub.connected and not await self.hub.wait_connected(cfg.connect_wait):
             self._log("warning", f"事件流 {cfg.connect_wait} 秒内没连上，先发送，靠补拉和轮询兜底")
@@ -429,8 +440,9 @@ class GrokBotSession(AgentSession):
             yield Error(e.kind, e.detail, voice=voice_for(e.kind))
 
 
-# 正在后台盯着的任务。asyncio 对任务只有弱引用，会话被关掉、对象被回收后任务会被当垃圾清掉，这里保住它们
-_watches = set()
+# 正在后台盯着的任务：(设备, Bot id) -> AfterWatch。asyncio 对任务只有弱引用，会话被关掉、对象被回收后任务会被
+# 当垃圾清掉，这里保住它们；按键登记是为了会话关了再开（设备断连重连）时，新会话也能接上旧的
+_watches: Dict[tuple, "AfterWatch"] = {}
 NOTICES = (WAITING_NOTICE, NO_REPLY_NOTICE)
 
 
@@ -449,7 +461,6 @@ class AfterWatch:
         self.sub = self.session.hub.subscribe(self.session.config.bot_id)
         self.tracker.generation = self.session.hub.generation
         self.task = asyncio.ensure_future(self._run())
-        _watches.add(self)
         self.session._log("info", f"后台盯着它，最多 {int(self.session.config.watch_max // 60)} 分钟")
 
     async def _run(self) -> None:
@@ -462,10 +473,13 @@ class AfterWatch:
             raise
         except (AgentSessionError, GrokBotError) as e:
             self.session._log("warning", f"后台盯着时出错，停止：{e.detail}")
+        except Exception as e:  # noqa: BLE001 —— 后台任务，意外也要把已收到的话汇报出去
+            self.session._log("error", f"后台盯着时意外出错，停止：{e!r}")
         finally:
             if self.sub is not None:
                 self.sub.close()
-            _watches.discard(self)
+            if _watches.get(self.session.watch_key) is self:
+                _watches.pop(self.session.watch_key, None)
         self._report()
 
     def _report(self) -> None:

@@ -159,6 +159,7 @@ class Credentials:
         return jwt_exp(self.access_token)
 
     def mark_needs_login(self) -> None:
+        self.reload()  # 别的进程可能刚写过新 token，别用内存里的旧数据把它盖掉
         if self._data:
             self.save({**self._data, "needsLogin": True})
 
@@ -297,10 +298,16 @@ class GrokBotClient:
                 return
             if not self.creds.refresh_token:
                 raise GrokBotError(ErrorKind.AUTH, "没有 refresh token，需要重新登录")
+            used = self.creds.refresh_token
             status, _, body = await self._request("POST", self.backend + "/oauth/token", {
-                "client_id": CLIENT_ID, "grant_type": "refresh_token", "refresh_token": self.creds.refresh_token,
+                "client_id": CLIENT_ID, "grant_type": "refresh_token", "refresh_token": used,
             }, timeout=20)
             if status != 200 or not isinstance(body, dict) or not body.get("access_token"):
+                # 管理后台和 provider 各有一份客户端，可能同时续期：输的一方被拒时，先看文件里是不是已经有新 token
+                self.creds.reload()
+                if self.creds.refresh_token != used and self.creds.expires_at - time.time() > REFRESH_AHEAD:
+                    self._log("info", "续期被拒，但别处已经续成功，用新的")
+                    return
                 if isinstance(body, dict) and body.get("shouldLogout") or status in (400, 401, 403):
                     self.creds.mark_needs_login()
                     raise GrokBotError(ErrorKind.AUTH, f"续期被拒绝（HTTP {status}），需要重新登录")
