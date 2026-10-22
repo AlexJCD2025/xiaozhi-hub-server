@@ -23,7 +23,8 @@ logger = setup_logging()
 EXPIRE_SECONDS = 24 * 3600
 MAX_PER_DEVICE = 20
 DELIVER_TIMEOUT = 600  # 设备一直不空闲时最多等这么久，之后留到下次机会
-AFTER_CONNECT_DELAY = 3  # 设备刚连上时先等问候播完
+# 设备刚连上时先等唤醒问候播完再念。问候那段没有"正在说话"的标志（它不经过 STT 消息），只能靠时间错开
+AFTER_CONNECT_DELAY = 6
 
 
 @dataclass
@@ -132,10 +133,16 @@ async def deliver_when_idle(conn, initial_delay: float = 0, timeout: float = DEL
             if not still_online(conn) or not pending(key):
                 return False
             if is_idle(conn):
-                text = take_text(key)
-                if not text:
+                picked = take(key)
+                if not picked:
                     return False
-                speak(conn, text)
+                try:
+                    speak(conn, "".join(r.text for r in picked))
+                except Exception as e:  # noqa: BLE001 —— 没念成就放回去，留到下次
+                    logger.bind(tag=TAG).warning(f"播报待汇报失败，放回去：{e!r}")
+                    with _lock:
+                        _box[key] = _prune(picked + _box.get(key, []))
+                    return False
                 return True
             await _sleep(0.5)
         logger.bind(tag=TAG).info(f"设备 {key} 一直不空闲，待汇报留到下次")
