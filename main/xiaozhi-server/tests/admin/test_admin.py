@@ -246,11 +246,12 @@ async def test_devices_and_emotion_test(client):
         async def send(self, data):
             sent.append(data)
 
-    fake = SimpleNamespace(session_id="s-1", device_id="dev-1", client_ip="192.168.6.211", websocket=FakeWS())
+    fake = SimpleNamespace(session_id="s-1", device_id="dev-1", client_ip="192.168.6.211", websocket=FakeWS(),
+                           hub_route={"current": "GrokBot_孙悟空"})  # 呼名切到的模型
     connections.register(fake)
     try:
         devices = (await (await client.get("/admin/api/devices")).json())["devices"]
-        assert devices[0]["device_id"] == "dev-1"
+        assert devices[0]["device_id"] == "dev-1" and devices[0]["model_label"] == "孙悟空"
         r = await client.post("/admin/api/devices/s-1/emotion-test", json={"interval": 0.5})
         data = await r.json()
         assert r.status == 200 and data == {"ok": True}

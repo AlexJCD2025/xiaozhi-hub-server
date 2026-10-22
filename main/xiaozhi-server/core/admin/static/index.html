@@ -556,6 +556,7 @@ function renderDevices(dev) {
       : t.stopped ? `已停止（播放到第 ${t.index}/${t.total} 个）。` : "依次播放已结束。";
     return `<div class="device" data-sid="${esc(d.session_id)}">
       <div class="device-top"><span class="dot on"></span><b class="mono">${esc(d.device_id || "未知设备")}</b>
+        ${d.model_label ? `<span class="pill" title="这台设备此刻在跟谁说话（叫称呼切换）；和大模型页的全局默认是两回事">当前：${esc(d.model_label)}</span>` : ""}
         <span class="muted small">${esc(d.ip || "")}</span><span class="muted small" data-since="${d.connected_at}">${duration(dev.now - d.connected_at)}</span>
         <button class="btn sm" data-act="toggle" style="margin-left:auto">${open ? "收起" : "表情测试"}</button></div>
       ${open ? `<p class="muted small" style="margin:10px 0 0">${progress}</p>
