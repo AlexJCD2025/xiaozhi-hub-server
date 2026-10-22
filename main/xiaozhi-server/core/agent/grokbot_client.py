@@ -395,10 +395,19 @@ class GrokBotClient:
         """`POST {网关}/api/<method>`。令牌失效或云端电脑休眠时重新 EnsureSandBox 再试一次。"""
         if self.conn is None:
             await self.ensure_box()
-        status, hdrs, body = await self._request(
-            "POST", self.gateway_url("/api/" + method), args or {}, self._gateway_headers(), timeout=timeout)
+        try:
+            status, hdrs, body = await self._request(
+                "POST", self.gateway_url("/api/" + method), args or {}, self._gateway_headers(), timeout=timeout)
+        except GrokBotError as e:
+            # 连不上网关：云端电脑可能换了机器（地址变了）。重新问后台要一次地址再试
+            if not retry:
+                raise
+            self._log("info", f"{method} 连不上网关（{e.detail[:80]}），重新获取网关连接")
+            self.conn = None
+            await self.ensure_box(wake=True)
+            return await self.call(method, args, retry=False, timeout=timeout)
         asleep = status == 417 or (hdrs is not None and (hdrs.get("x-anyrun-failure-reason") or "").startswith("pod_hibernated"))
-        if retry and (status in (401, 403) or asleep):
+        if retry and (status in (401, 403) or asleep or status >= 500):
             self._log("info", f"{method} 返回 {status}，重新获取网关连接")
             self.conn = None
             await self.ensure_box(wake=True)
@@ -435,7 +444,9 @@ class GrokBotClient:
         headers = {**self._gateway_headers(), "accept": "text/event-stream"}
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=20, sock_read=STREAM_READ_TIMEOUT)
         try:
-            async with self.session().get(self.gateway_url("/events"), headers=headers, timeout=timeout) as res:
+            # read_bufsize 放大：一条 updated 事件带着整段长回复，超过 aiohttp 默认的行上限会断流
+            async with self.session().get(self.gateway_url("/events"), headers=headers, timeout=timeout,
+                                          read_bufsize=4 * 1024 * 1024) as res:
                 if res.status in (401, 403, 417):
                     self.conn = None
                     raise GrokBotError(ErrorKind.SERVER, f"/events HTTP {res.status}")
@@ -459,6 +470,7 @@ class GrokBotClient:
                         data.append(line[5:].lstrip(" "))
                     # 以 ":" 开头的是心跳注释（:ping），retry: 是重连提示，都不用管
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            self.conn = None  # 连不上或一直没字节：下次连之前重新要网关地址（云端电脑可能换了机器）
             raise GrokBotError(ErrorKind.SERVER, f"/events {e!r}")
 
 

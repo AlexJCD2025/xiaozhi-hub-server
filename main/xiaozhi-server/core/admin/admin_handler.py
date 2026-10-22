@@ -371,6 +371,8 @@ class AdminHandler:
                 result = await self._apply("ASR")
                 if result.get("failed"):
                     note += f"；热词重新加载失败：{result['error']}"
+        if changed and any(c not in (new_merged.get("LLM") or {}) for c in changed):
+            note += "；取消的 Bot 对正连着的设备要等它重新连接才生效"
         return self._json({"ok": True, "changed": changed, "note": note})
 
     async def handle_call_names_learn(self, request: web.Request):

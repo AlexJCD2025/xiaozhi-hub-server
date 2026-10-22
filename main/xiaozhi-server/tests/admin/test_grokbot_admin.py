@@ -211,3 +211,42 @@ async def test_grokbot_requires_login(cfg_path, tmp_path):
         assert (await c.get("/admin/api/grokbot")).status == 401
         assert (await c.post("/admin/api/grokbot/login", json={})).status == 401
     await handler.grokbot.close()
+
+
+async def test_login_not_pending_once_approved_even_if_bot_list_is_slow(tmp_path):
+    """批准后任务还要读 Bot 列表（可能要唤醒云端电脑几分钟）：页面不该继续显示"等待批准"，取消也不该盖掉成功。"""
+    import asyncio
+    from core.admin.grokbot import GrokBotAdmin
+    from core.agent.grokbot_client import _sleep
+
+    admin = GrokBotAdmin(tmp_path / "c.json")
+    gate = asyncio.Event()
+
+    class FakeClient:
+        def start_login(self):
+            from core.agent.grokbot_client import LoginFlow
+            return LoginFlow(uuid="u", verifier="v", url="https://cursor.com/loginDeepControl?x")
+
+        async def poll_login(self, flow, timeout):
+            admin.creds.save({"accessToken": jwt(3600), "refreshToken": "r"})
+            return True
+
+        conn = None
+
+    admin._client = FakeClient()
+
+    async def slow_fetch():
+        await gate.wait()
+        return []
+
+    admin.fetch_bots = slow_fetch
+    await admin.start_login()
+    for _ in range(50):
+        if admin._approved:
+            break
+        await _sleep(0.02)
+    st = admin.status()
+    assert st["login"]["pending"] is False and st["login"]["result"]["ok"] and st["account"]["logged_in"]
+    await admin.cancel_login()  # 用户此时点"取消"
+    assert admin.status()["login"]["result"]["ok"] is True  # 不会被盖成"已取消"
+    gate.set()

@@ -32,6 +32,7 @@ class GrokBotAdmin:
         self.logger = logger
         self.backend = backend  # 只在测试时指向假服务
         self._client: Optional[GrokBotClient] = None
+        self._approved = False  # 这次登录已经拿到 token
         self._flow: Optional[LoginFlow] = None
         self._task: Optional[asyncio.Task] = None
         self._result: Optional[dict] = None  # 上一次登录的结果 {"ok": bool, "note": str, "at": 时间}
@@ -53,7 +54,8 @@ class GrokBotAdmin:
 
     @property
     def login_pending(self) -> bool:
-        return self._task is not None and not self._task.done()
+        """还在等浏览器里批准。拿到 token 后任务还会去读 Bot 列表（可能要唤醒云端电脑），那段不算等待。"""
+        return self._task is not None and not self._task.done() and not self._approved
 
     def status(self) -> dict:
         return {
@@ -77,6 +79,7 @@ class GrokBotAdmin:
             return self._flow.url
         self._flow = self.client().start_login()
         self._result = None
+        self._approved = False
         self._task = asyncio.ensure_future(self._poll(self._flow))
         self._log("info", "管理后台开始 Grok Bot 登录，等待浏览器里批准")
         return self._flow.url
@@ -85,6 +88,7 @@ class GrokBotAdmin:
         try:
             ok = await self.client().poll_login(flow, timeout=LOGIN_TIMEOUT)
             if ok:
+                self._approved = True
                 self._result = {"ok": True, "note": "登录成功", "at": time.time()}
                 self._log("info", "Grok Bot 登录成功")
                 self.client().conn = None
@@ -95,7 +99,8 @@ class GrokBotAdmin:
             else:
                 self._result = {"ok": False, "note": "没有在浏览器里批准，或者等待超时", "at": time.time()}
         except asyncio.CancelledError:
-            self._result = {"ok": False, "note": "已取消", "at": time.time()}
+            if not self._approved:
+                self._result = {"ok": False, "note": "已取消", "at": time.time()}
             raise
         except GrokBotError as e:
             self._result = {"ok": False, "note": f"登录失败：{e.detail}", "at": time.time()}

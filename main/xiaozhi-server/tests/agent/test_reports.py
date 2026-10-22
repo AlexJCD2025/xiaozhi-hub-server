@@ -125,3 +125,27 @@ async def test_on_conn_open_waits_for_greeting(spoken, monkeypatch):
         assert spoken == ["孙悟空做完了：好。"]
     finally:
         connections.unregister(conn)
+
+
+async def test_speak_marks_device_speaking_so_second_report_waits(spoken):
+    import asyncio
+    conn = FakeConn(loop=asyncio.get_running_loop())
+    connections.register(conn)
+    try:
+        reports.add("dev-1", "bot-1", "孙悟空做完了：第一。")
+        for _ in range(50):
+            if spoken:
+                break
+            await real_sleep(0.02)
+        assert spoken == ["孙悟空做完了：第一。"] and conn.client_is_speaking is True  # 念的时候算在说话
+        reports.add("dev-1", "bot-2", "林黛玉做完了：第二。")
+        await real_sleep(0.2)
+        assert spoken == ["孙悟空做完了：第一。"]  # 第一条还在念，第二条等着
+        conn.client_is_speaking = False  # TTS 播完
+        for _ in range(50):
+            if len(spoken) == 2:
+                break
+            await real_sleep(0.02)
+        assert spoken[-1] == "林黛玉做完了：第二。"
+    finally:
+        connections.unregister(conn)

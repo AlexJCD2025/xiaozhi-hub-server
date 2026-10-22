@@ -978,7 +978,7 @@ async def test_watch_is_picked_up_by_new_session_after_close(cloud, hub):
 
 
 async def test_baseline_tail_failure_does_not_send(cloud, hub):
-    cloud.tail_fail = 2
+    cloud.tail_fail = 4  # 客户端对 5xx 自己会重试一次，会话层再试一次：4 次失败才算真的读不到
     s = GrokBotSession(hub, cfg())
     await s.start()
     evs = await collect(s)
@@ -1069,3 +1069,44 @@ def test_abort_during_slow_start_does_not_send(tmp_path, monkeypatch):
     c.client_abort = False
     assert run(p, c, "再来") == "收到。"  # 锁没被占着，下一句正常
     assert FakeGrokAgent.instances[0].sent == ["再来"]
+
+
+# ---------- 第二位独立 reviewer 后补的用例 ----------
+
+async def test_close_mid_turn_turns_into_watch(cloud, hub):
+    """设备在 Bot 干活时断开：这一轮当作被打断，转后台盯着，做完进待汇报箱，重连后能念。"""
+    s, got = reporting_session(hub)
+    s.device_key = "dev-1"
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await s.close()  # 设备断开 → provider 关掉会话
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert isinstance(evs[-1], Done) and evs[-1].interrupted
+    await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("做完了。")})
+    await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+    await wait_until(lambda: got, timeout=3)
+    assert got == ["孙悟空做完了：做完了。"]
+
+
+async def test_gateway_connection_error_re_ensures_box(cloud, client):
+    """云端电脑换了机器：旧网关地址连不上，要重新向后台要地址，而不是一直报错。"""
+    await client.ensure_box()
+    client.conn = {**client.conn, "gatewayUrl": "http://127.0.0.1:9"}  # 打不开的端口
+    agents = await client.list_agents()
+    assert agents[0]["name"] == "孙悟空" and cloud.ensure_calls == 2 and client.conn["gatewayUrl"] == cloud.url
+
+
+async def test_gateway_5xx_re_ensures_box_once(cloud, client):
+    cloud.tail_fail = 1
+    await client.ensure_box()
+    entries = await client.transcript_tail("bot-1", 5)
+    assert entries and cloud.ensure_calls == 2
+    cloud.tail_fail = 2
+    with pytest.raises(GrokBotError):
+        await client.transcript_tail("bot-1", 5)  # 只重试一次
