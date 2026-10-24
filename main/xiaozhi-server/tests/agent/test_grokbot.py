@@ -54,6 +54,8 @@ class FakeCloud:
             web.post("/api/sendPrompt", self.send_prompt),
             web.post("/api/promptAcceptanceStatus", self.acceptance_status),
             web.post("/api/getAgentTranscriptTail", self.tail),
+            web.post("/api/getAgentTranscriptWindow", self.window),
+            web.post("/api/getAgentTranscript", self.transcript),
             web.get("/events", self.events),
         ])
         self.url = None
@@ -70,6 +72,8 @@ class FakeCloud:
         self.acceptance = {"status": "accepted"}
         self.hibernate_once = False
         self.tail_fail = 0  # 接下来这么多次 getAgentTranscriptTail 返回 500
+        self.window_fail = 0  # 同上，getAgentTranscriptWindow
+        self.transcript_fail = 0  # 同上，getAgentTranscript
         self.on_refresh = None  # 续期请求到达时先调它（模拟别处同时续期成功）
         self.events_q: asyncio.Queue = asyncio.Queue()
         self.stream_dead = False  # 连上了但什么都不推
@@ -137,9 +141,22 @@ class FakeCloud:
     async def tail(self, request):
         if self.tail_fail > 0:
             self.tail_fail -= 1
-            return web.Response(status=500, text="tail boom")
+            return web.json_response({"error": "server transcript tail is not enabled"}, status=500)
         body = await request.json()
         return web.json_response({"entries": self.entries[-int(body.get("limit", 10)):], "nextBeforeSeq": 0})
+
+    async def window(self, request):
+        if self.window_fail > 0:
+            self.window_fail -= 1
+            return web.Response(status=500, text="window boom")
+        body = await request.json()
+        return web.json_response({"entries": self.entries[-int(body.get("limit", 10)):], "nextBeforeSeq": 0, "threadCounts": {}})
+
+    async def transcript(self, request):
+        if self.transcript_fail > 0:
+            self.transcript_fail -= 1
+            return web.Response(status=500, text="transcript boom")
+        return web.json_response(self.entries)
 
     async def events(self, request):
         self.streams += 1
@@ -206,8 +223,11 @@ def echo_entry(cloud, text="你好"):
     return {"id": "e1", "kind": "message", "role": "user", "content": text, "clientNonce": cloud.sent[-1]["clientNonce"]}
 
 
-def reply_entry(text="**收到**", eid="e2"):
-    return {"id": eid, "kind": "send-message", "message": {"type": "text", "content": text}}
+def reply_entry(text="**收到**", eid="e2", seq=None):
+    e = {"id": eid, "kind": "send-message", "message": {"type": "text", "content": text}}
+    if seq is not None:
+        e["seq"] = seq
+    return e
 
 
 async def collect(session, text="你好"):
@@ -977,13 +997,11 @@ async def test_watch_is_picked_up_by_new_session_after_close(cloud, hub):
     await s2.close()
 
 
-async def test_baseline_tail_failure_does_not_send(cloud, hub):
-    cloud.tail_fail = 4  # 客户端对 5xx 自己会重试一次，会话层再试一次：4 次失败才算真的读不到
+async def test_baseline_tail_failure_falls_back_to_other_methods(cloud, hub):
+    """2026-10-24 真机：云端电脑换机器后 getAgentTranscriptTail 一度 500，换 getAgentTranscriptWindow 照常发。"""
+    cloud.tail_fail = 10
     s = GrokBotSession(hub, cfg())
     await s.start()
-    evs = await collect(s)
-    assert isinstance(evs[-1], Error) and evs[-1].kind == ErrorKind.SERVER and cloud.sent == []
-    cloud.tail_fail = 1  # 只失败一次：重试后照常发
     async def script():
         await wait_until(lambda: cloud.sent)
         await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
@@ -992,7 +1010,29 @@ async def test_baseline_tail_failure_does_not_send(cloud, hub):
     task = asyncio.ensure_future(script())
     evs = await collect(s)
     await task
-    assert texts(evs) == ["好。"]
+    assert texts(evs) == ["好。"] and cloud.window_fail == 0
+    await s.close()
+
+
+async def test_no_baseline_at_all_uses_echo_seq(cloud, hub):
+    """三个读对话的接口都不通：照常发，靠回显的 seq 分新旧——排在前面的旧回复不念，后面的念。"""
+    cloud.tail_fail = cloud.window_fail = cloud.transcript_fail = 10
+    s = GrokBotSession(hub, cfg())
+    await s.start()
+
+    async def script():
+        await wait_until(lambda: cloud.sent)
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": True}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("旧的回复。", "old1", seq=5)})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": {**echo_entry(cloud), "seq": 10}})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("更旧的。", "old2", seq=7)})
+        await cloud.push("transcript", {"agentId": "bot-1", "type": "appended", "entry": reply_entry("新的回复。", "new1", seq=11)})
+        await cloud.push("agent-upserted", {"agent": {"id": "bot-1", "isRunning": False}})
+
+    task = asyncio.ensure_future(script())
+    evs = await collect(s)
+    await task
+    assert cloud.sent and texts(evs) == ["新的回复。"] and isinstance(evs[-1], Done)
     await s.close()
 
 
@@ -1107,6 +1147,7 @@ async def test_gateway_5xx_re_ensures_box_once(cloud, client):
     await client.ensure_box()
     entries = await client.transcript_tail("bot-1", 5)
     assert entries and cloud.ensure_calls == 2
-    cloud.tail_fail = 2
+    cloud.tail_fail = cloud.window_fail = cloud.transcript_fail = 10
     with pytest.raises(GrokBotError):
-        await client.transcript_tail("bot-1", 5)  # 只重试一次
+        await client.transcript_tail("bot-1", 5)  # 每个接口只重试一次，三个都不通才放弃
+    assert cloud.tail_fail == 8 and cloud.window_fail == 8 and cloud.transcript_fail == 8

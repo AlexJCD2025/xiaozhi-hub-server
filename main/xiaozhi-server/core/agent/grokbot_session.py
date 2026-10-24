@@ -123,6 +123,8 @@ class Tracker:
         self.generation = generation
         self.log = log
         self.t0 = time.monotonic()
+        self.have_baseline = True  # 发送前读到了对话尾部；读不到时靠回显的 seq 分新旧
+        self.echo_seq: Optional[int] = None  # 我们这句话在对话里的序号，比它小的都是旧的
         self.echoed = False
         self.busy = False
         self.was_busy = False
@@ -143,9 +145,17 @@ class Tracker:
                 entry.get("kind") == "message" and entry.get("role") == "user" and entry.get("content") == self.sent_text):
             if not self.echoed:
                 self.echoed = True
+                if isinstance(entry.get("seq"), (int, float)):
+                    self.echo_seq = int(entry["seq"])
                 self.log("info", f"{self._since()} 消息已出现在对话里")
             self.seen.setdefault(entry_id, "")
             return []
+        seq = entry.get("seq")
+        if self.echo_seq is not None and isinstance(seq, (int, float)) and seq <= self.echo_seq:
+            self.seen.setdefault(entry_id, "")  # 排在我们这句话前面的，都是旧的
+            return []
+        if not self.have_baseline and self.echo_seq is None:
+            return []  # 没有基线又还没见到回显：分不清新旧，先不念（回显到了之后轮询会再送来）
         content = reply_text(entry)
         if entry_id in self.seen:
             # 已经念过的条目被更新：文字在原来基础上变长（流式追加）就只念多出来的部分，别的改动不管
@@ -394,23 +404,24 @@ class GrokBotSession(AgentSession):
         while not queue.empty():
             queue.get_nowait()
 
-        # 不知道发送前对话里有什么，就分不清哪些回复是旧的：读不到尾部宁可不发
-        for attempt in (1, 2):
-            try:
-                for e in await client.transcript_tail(bot_id, cfg.tail_limit):
-                    if e.get("id"):
-                        seen[str(e["id"])] = ""
-                break
-            except GrokBotError as e:
-                self._log("warning", f"读对话尾部失败（第 {attempt} 次）：{e.detail}")
-                if e.kind == ErrorKind.AUTH or attempt == 2:
-                    yield Error(e.kind, e.detail, voice=voice_for(e.kind))
-                    return
+        # 发送前记下对话里已有的条目，之后只念新的。读不到也照常发：之后用回显的 seq 分新旧
+        have_baseline = True
+        try:
+            for e in await client.transcript_tail(bot_id, cfg.tail_limit):
+                if e.get("id"):
+                    seen[str(e["id"])] = ""
+        except GrokBotError as e:
+            if e.kind == ErrorKind.AUTH:
+                yield Error(e.kind, e.detail, voice=voice_for(e.kind))
+                return
+            have_baseline = False
+            self._log("warning", f"读对话尾部失败，改用回显序号分新旧：{e.detail}")
 
         if not self.hub.connected and not await self.hub.wait_connected(cfg.connect_wait):
             self._log("warning", f"事件流 {cfg.connect_wait} 秒内没连上，先发送，靠补拉和轮询兜底")
 
         tracker = Tracker(cfg, nonce, sent_text, seen, self.hub.generation, self._log)
+        tracker.have_baseline = have_baseline
         try:
             res = await client.send_prompt(bot_id, sent_text, nonce)
             self._log("info", f"{tracker._since()} sendPrompt 返回 {json.dumps(res, ensure_ascii=False)[:120]}")

@@ -433,9 +433,24 @@ class GrokBotClient:
         return res if isinstance(res, dict) else {"raw": res}
 
     async def transcript_tail(self, agent_id: str, limit: int = 10) -> List[dict]:
-        res = await self.call("getAgentTranscriptTail", {"id": agent_id, "limit": limit})
-        entries = res.get("entries") if isinstance(res, dict) else res
-        return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+        """对话尾部最近 limit 条。实测 2026-10-24 云端电脑换机器后 getAgentTranscriptTail 一度返回
+        500 "server transcript tail is not enabled"，所以依次试三个接口，哪个能用用哪个。"""
+        last = None
+        for method, args in (("getAgentTranscriptTail", {"id": agent_id, "limit": limit}),
+                             ("getAgentTranscriptWindow", {"id": agent_id, "limit": limit}),
+                             ("getAgentTranscript", {"id": agent_id})):
+            try:
+                res = await self.call(method, args)
+            except GrokBotError as e:
+                if e.kind == ErrorKind.AUTH:
+                    raise
+                last = e
+                self._log("warning", f"{method} 失败，换下一个接口：{e.detail[:120]}")
+                continue
+            entries = res.get("entries") if isinstance(res, dict) else res
+            if isinstance(entries, list):
+                return [e for e in entries if isinstance(e, dict)][-limit:]
+        raise last or GrokBotError(ErrorKind.SERVER, "读不到对话记录")
 
     async def read_events(self, on_event: Callable[[str, dict], None], on_connected: Callable[[], None] = None) -> None:
         """读一条事件流直到它断开（正常约 57 秒一次）。每帧调用 on_event(channel, payload)。"""
