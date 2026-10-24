@@ -36,7 +36,7 @@ from core.agent.agent_session import ErrorKind
 BACKEND = "https://api2.cursor.sh"
 WEBSITE = "https://cursor.com"
 CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB"  # 桌面 App 的公开 OAuth client_id
-CLIENT_VERSION = "0.70.2"  # 发给服务端的客户端版本号；实测服务端不校验客户端身份
+CLIENT_VERSION = "0.75.3"  # 发给服务端的客户端版本号，跟着本机桌面 App 的版本走；实测服务端不校验客户端身份
 GATEWAY_SUFFIXES = (".cursor.sh", ".cursor.com", ".cursorvm.com")
 REFRESH_AHEAD = 300  # access token 到期前这么多秒就续期
 WAKE_TIMEOUT = 180  # 云端电脑休眠时最多等多久醒来
