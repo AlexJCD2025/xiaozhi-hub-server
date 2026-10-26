@@ -1,7 +1,7 @@
 """Agent 会话的统一接口。
 
 上层（LLM provider）只关心三件事：发一句话拿回一段段文字、打断、关闭。
-Claude 用 claude-agent-sdk 实现，Grok Bot 用云端网关实现，以后的 Codex 用 app-server 实现，都遵循这里的接口和事件。
+Claude 用 claude-agent-sdk 实现，Grok Bot 用云端网关实现，Codex 用本机 `codex exec --json` 子进程实现，都遵循这里的接口和事件。
 """
 
 from abc import ABC, abstractmethod
@@ -66,6 +66,15 @@ STARTING_LABELS = ("init", "api_retry")
 class Done:
     session_id: Optional[str] = None
     interrupted: bool = False
+
+
+@dataclass
+class ConfirmRequest:
+    """计划阶段结束，写入或危险操作要等设备确认。本轮只把 prompt 念出来，不执行。"""
+
+    prompt: str
+    summary: str = ""
+    reasons: tuple = ()
 
 
 @dataclass

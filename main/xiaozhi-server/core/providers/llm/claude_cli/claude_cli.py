@@ -129,7 +129,8 @@ class ConnState:
 
 
 class LLMProvider(LLMProviderBase):
-    # 日志和提示里对这个 Agent 的称呼。其他 Agent 的 provider（grok_bot）继承本类，改掉它和 _ensure_agent 即可
+    # 日志和提示里对这个 Agent 的称呼。
+    # grok_bot 继承本类并覆盖 _ensure_agent；codex_cli 覆盖 _open_session 和 _run_turn。
     AGENT_LABEL = "Claude Code"
 
     def __init__(self, config: dict):
@@ -198,7 +199,7 @@ class LLMProvider(LLMProviderBase):
         """实例被替换后调用：不再接新连接，现有连接照常对话；没有连接时停止事件循环，后台线程退出。"""
         with self._states_lock:
             self._retiring = True
-        logger.bind(tag=TAG).info(f"claude_cli 旧实例退役，剩余连接 {len(self._states)} 个，全部关闭后结束后台线程")
+        logger.bind(tag=TAG).info(f"{self.AGENT_LABEL} 旧实例退役，剩余连接 {len(self._states)} 个，全部关闭后结束后台线程")
         self._maybe_stop()
 
     def _maybe_stop(self) -> None:
@@ -218,7 +219,7 @@ class LLMProvider(LLMProviderBase):
             for t in still:
                 t.cancel()
         loop.stop()
-        logger.bind(tag=TAG).info("claude_cli 旧实例的后台线程已结束")
+        logger.bind(tag=TAG).info(f"{self.AGENT_LABEL} 旧实例的后台线程已结束")
 
     # ---------- 启动自检 ----------
 
@@ -312,20 +313,28 @@ class LLMProvider(LLMProviderBase):
             if task is not None and not task.done() and st.turn_gen == gen:
                 task.cancel()
 
-    async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
-        """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Claude。
+    def _resume_match(self, text: str):
+        """是不是接续指令。不是时返回 None；是时返回关键字以外的内容。子类可以加上自己的说法。"""
+        return match_resume(text, self.resume_keywords)
 
-        接续指令后面还带着别的内容时（如"接着上次聊那个 bug"），接续后把整句话照常发给 Claude，
+    def _open_session(self, resume_id: Optional[str], system_prompt: str):
+        """按当前 provider 打开会话。Claude 用 ClaudeSession；Codex 覆盖这个方法。"""
+        cfg = ClaudeSessionConfig(**{**self.session_config.__dict__,
+                                     "system_prompt_append": (system_prompt or "") + "\n" + VOICE_RULES})
+        return ClaudeSession(cfg, resume_id=resume_id, logger=logger.bind(tag=TAG))
+
+    async def _ensure_agent(self, st: ConnState, text: str, out: queue.Queue, system_prompt: str) -> bool:
+        """确保有可用的进程。返回 True 表示这句话已经作为"接续指令"处理完，不必再发给 Agent。
+
+        接续指令后面还带着别的内容时（如"接着上次聊那个 bug"），接续后把整句话照常发给 Agent，
         不能只回一句"好的"就把后半句吞掉。
         """
         if st.agent and st.agent.alive:
             return False
-        remainder = match_resume(text, self.resume_keywords)
+        remainder = self._resume_match(text)
         keyword = remainder is not None
         resume_id, reason = choose_resume(self.store.get(st.key), keyword, self.resume_window)
-        cfg = ClaudeSessionConfig(**{**self.session_config.__dict__,
-                                     "system_prompt_append": (system_prompt or "") + "\n" + VOICE_RULES})
-        agent = ClaudeSession(cfg, resume_id=resume_id, logger=logger.bind(tag=TAG))
+        agent = self._open_session(resume_id, system_prompt)
         t0 = time.time()
         try:
             await agent.start()
@@ -333,7 +342,7 @@ class LLMProvider(LLMProviderBase):
             if e.kind != ErrorKind.SESSION_MISSING:
                 raise
             logger.bind(tag=TAG).warning(f"接续会话 {resume_id} 失败，改为新开会话")
-            agent = ClaudeSession(cfg, logger=logger.bind(tag=TAG))
+            agent = self._open_session(None, system_prompt)
             await agent.start()  # 新会话也启动失败时（如未登录、网络问题）保留旧记录，下次还能接续
             self.store.forget(st.key)
             if keyword:
@@ -344,8 +353,8 @@ class LLMProvider(LLMProviderBase):
             raise AgentSessionError(ErrorKind.PROCESS_EXITED, "连接已关闭")
         st.agent = agent
         logger.bind(tag=TAG).info(
-            f"Claude Code 进程已启动（{time.time() - t0:.1f}s），设备 {st.key}，"
-            f"{'接续会话 ' + resume_id if resume_id else '新会话 ' + agent.session_id}（{reason}）"
+            f"{self.AGENT_LABEL} 进程已启动（{time.time() - t0:.1f}s），设备 {st.key}，"
+            f"{'接续会话 ' + resume_id if resume_id else '新会话 ' + (agent.session_id or '')}（{reason}）"
         )
         if keyword and not remainder:
             if resume_id:

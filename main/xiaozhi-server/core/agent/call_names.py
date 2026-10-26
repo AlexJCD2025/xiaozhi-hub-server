@@ -21,7 +21,11 @@ if TYPE_CHECKING:
 
 TAG = __name__
 
-DEFAULT_MODELS = {"ClaudeCLI": ["claude", "cloud", "clod", "clot", "克劳德"]}
+DEFAULT_MODELS = {
+    "ClaudeCLI": ["claude", "cloud", "clod", "clot", "克劳德"],
+    # 语音识别常把 Codex 听成 codeex。整句没有「嗨」时不会当成呼名。
+    "CodexCLI": ["codex", "codeex", "扣得思", "哥的克斯"],
+}
 DEFAULT_REPLY = "我在"
 # 发缓存的音频前等一会儿：设备收到 tts start 后要先切到说话状态（会清空解码队列），切换完成前收到的音频会被丢掉。
 # 正常合成时中间有约 2 秒的合成时间，不会碰到；缓存的音频紧跟着就到，不等的话设备只显示文字、没有声音
@@ -253,9 +257,14 @@ async def handle_call_name(conn: "ConnectionHandler", text: str):
 
 
 def _pending_report(conn: "ConnectionHandler", model: str):
-    """这个模型是 Grok Bot 且有做完还没念的活：返回 (bot_id, 要念的话)；否则 ("", "")。"""
+    """Grok Bot 或 Codex 有做完还没念的话时，返回 (报告 id, 要念的话)；否则 ("", "")。"""
     from core.agent import llm_router, reports
+    from core.agent.codex_safety import CODEX_REPORT_ID
 
     entry = (llm_router._server_config(conn).get("LLM") or {}).get(model) or {}
-    bot_id = str(entry.get("bot_id") or "").strip() if isinstance(entry, dict) else ""
+    if not isinstance(entry, dict):
+        return "", ""
+    if entry.get("type") == "codex_cli":
+        return CODEX_REPORT_ID, reports.take_text(reports.device_key(conn), CODEX_REPORT_ID)
+    bot_id = str(entry.get("bot_id") or "").strip()
     return bot_id, (reports.take_text(reports.device_key(conn), bot_id) if bot_id else "")

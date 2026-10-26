@@ -79,6 +79,23 @@ def collect_status(config: dict, merged: dict) -> dict:
         if intent_type != "nointent":
             checks.append(_check("意图识别", False, f"使用 Claude CLI 时应设为 nointent，当前为 {intent_type}",
                                  level="warn"))
+    elif llm_type == "codex_cli":
+        from core.providers.llm.codex_cli.codex_cli import codex_cli_version, find_codex_cli
+
+        cli = find_codex_cli(llm_entry.get("cli_path") or None)
+        ok = False
+        detail = "未找到 codex，请先安装 Codex CLI 并登录"
+        if cli:
+            try:
+                detail = f"{codex_cli_version(cli)}（{cli}）"
+                ok = True
+            except Exception as e:
+                detail = f"{cli} 运行失败: {e}"
+        checks.append(_check("Codex CLI", ok, detail))
+        intent_type = config_store.entry_type(merged, "Intent")
+        if intent_type != "nointent":
+            checks.append(_check("意图识别", False, f"使用 Codex CLI 时应设为 nointent，当前为 {intent_type}",
+                                 level="warn"))
     else:
         secrets = [k for k in llm_entry if config_store.SECRET_FIELD.search(k)]
         missing = [k for k in secrets if config_store.is_placeholder(llm_entry.get(k))]
