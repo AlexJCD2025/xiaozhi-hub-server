@@ -32,7 +32,7 @@ def test_call_name_with_content(asr_text, rest):
     "codeex和cloud哪个好用？",
     "嗨你好。",
     "嗨,你怎么看？",                  # Grok 被吞掉，按没有称呼处理
-    "Hi, Koex.",                      # Codex 暂不支持
+    "Hi, Koex.",                      # 和 codex / codeex 差太多，不当成呼名
     "嗨 cloudflare 怎么配置",          # 称呼后面紧跟字母，不是称呼
     "嗨cloud code现在是什么版本？",     # 问的是 Claude Code，不是在叫 Claude
     "嗨 Claude Code 怎么安装",
@@ -45,6 +45,15 @@ def test_call_name_with_content(asr_text, rest):
 ])
 def test_not_call_name(asr_text):
     assert match_call_name(asr_text) is None
+
+
+@pytest.mark.parametrize("asr_text, rest", [
+    ("嗨 Codex", ""),
+    ("Hi, codeex.", ""),
+    ("hey codex，看看工作目录", "看看工作目录"),
+])
+def test_codex_call_name(asr_text, rest):
+    assert match_call_name(asr_text) == ("CodexCLI", rest)
 
 
 def test_custom_models():

@@ -38,6 +38,26 @@ LLM:
     progress_interval_seconds: 30   # 干活时这么久没开口就提示进度，之后间隔逐渐拉长到 4 倍并报已用时间；填 0 关闭
     progress_reply: 还在处理，请稍等
 
+  # 本机 Codex CLI（需要先安装并在终端用 ChatGPT 登录）。默认不选中。
+  # 要让设备一连上就用它：把上面的 selected_module.LLM 改成 CodexCLI。
+  # 也可以不改默认，对设备说「嗨 Codex」。
+  CodexCLI:
+    type: codex_cli
+    cli_path: /opt/homebrew/bin/codex   # 留空则自动查找；Mac 上 Homebrew 一般在这个路径
+    model: gpt-5.6-sol
+    workdir: ~/xiaozhi-workspace
+    sandbox_plan: read-only             # 计划阶段。不要改成 danger-full-access
+    sandbox_execute: workspace-write    # 确认之后的执行阶段。不会加 --full-auto / --yolo
+    turn_timeout_seconds: 600
+    stall_timeout_seconds: 30           # 命令还在跑的时候不算卡住
+    idle_timeout_seconds: 300
+    resume_window_minutes: 120
+    confirm_timeout_seconds: 45         # 超时等于取消，不会自动同意。填 0 表示一直等到你说取消
+    first_reply_filler: 好的，我看一下
+    filler_delay_seconds: 2
+    progress_interval_seconds: 30       # 大约在第 30、60、120 秒报一次进度
+    progress_reply: 还在处理，请稍等
+
   # Claude API（OpenAI 兼容接口），在管理后台填写 API Key 后可切换使用
   ClaudeAPI:
     type: openai

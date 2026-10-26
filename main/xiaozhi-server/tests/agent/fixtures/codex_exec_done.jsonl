@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_9","type":"command_execution","command":"rm old.log","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_9","type":"command_execution","command":"rm old.log","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_10","type":"agent_message","text":"已经删掉 old.log 了。"}}
+{"type":"turn.completed","usage":{"input_tokens":30,"output_tokens":8}}

@@ -115,6 +115,9 @@ def describe_stages(merged: dict) -> list:
     if llm.get("type") == "claude_cli":
         llm_value = f"Claude Code · {_claude_model_label(llm.get('model'))}"
         llm_hint = f"思考力度：{_effort_label(llm.get('effort'))}"
+    elif llm.get("type") == "codex_cli":
+        llm_value = f"Codex CLI · {llm.get('model') or 'gpt-5.6-sol'}"
+        llm_hint = "写入、删除、部署或发消息前，要在设备上确认"
     else:
         llm_value = _llm_label(llm_name, llm)
         llm_hint = str(llm.get("model_name") or "")

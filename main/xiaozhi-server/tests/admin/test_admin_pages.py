@@ -333,9 +333,11 @@ def test_claude_cli_new_fields_can_be_added(cfg_path):
 def test_describe_call_names_defaults(cfg_path):
     d = pages.describe_call_names(merged(cfg_path))
     assert d["enabled"] is True and d["default"] == "ClaudeCLI"
-    assert [m["entry"] for m in d["models"]] == ["ClaudeCLI"] and "cloud" in d["models"][0]["aliases"]
+    assert [m["entry"] for m in d["models"]] == ["ClaudeCLI", "CodexCLI"]
+    assert "cloud" in d["models"][0]["aliases"] and d["models"][1]["ready"] is True
     assert d["models"][0]["ready"] is True
-    assert [t["entry"] for t in d["targets"]] == ["ClaudeCLI"]  # API 厂商都还没填 Key，不能选
+    # API 厂商都还没填 Key，不能选。本机 Codex 和 Claude 一样，配置里有条目就能配称呼。
+    assert [t["entry"] for t in d["targets"]] == ["ClaudeCLI", "CodexCLI"]
 
 
 def _configure_deepseek(path):

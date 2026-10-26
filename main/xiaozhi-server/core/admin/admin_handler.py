@@ -712,8 +712,8 @@ class AdminHandler:
         if mode not in catalog.INTENT_MODES:
             return self._error("意图识别只能选“不用插件”或“用插件”", 400)
         merged = await self._blocking(self._merged)
-        if pages.llm_kind(merged) == "cli" and mode != "nointent":
-            return self._error("使用 Claude Code 时只能选“不用插件”", 400)
+        if pages.llm_kind(merged) in ("cli", "codex") and mode != "nointent":
+            return self._error("使用本机 Agent 时只能选“不用插件”", 400)
         notes = []
         try:
             if "functions" in body:
@@ -723,7 +723,7 @@ class AdminHandler:
                     name = pages.intent_entry_name(merged, "function_call")
                     if (merged.get("selected_module") or {}).get("Intent") == name:
                         notes.append((await self._apply("Intent"))["note"])
-            if pages.llm_kind(merged) != "cli":
+            if pages.llm_kind(merged) not in ("cli", "codex"):
                 await self._blocking(pages.remember_api_intent, mode, self.config_path)
             result = await self._switch("Intent", pages.intent_entry_name(merged, mode))
         except KeyError:

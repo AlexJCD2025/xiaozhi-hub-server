@@ -66,9 +66,12 @@ def describe_vendor(vendor: dict, merged: dict) -> dict:
 
 def llm_kind(merged: dict, name: str = None) -> str:
     name = name or _selected(merged, "LLM")
-    if config_store.entry_type(merged, "LLM", name) == "claude_cli":
+    kind = config_store.entry_type(merged, "LLM", name)
+    if kind == "claude_cli":
         return "cli"
-    if config_store.entry_type(merged, "LLM", name) == "grok_bot":
+    if kind == "codex_cli":
+        return "codex"
+    if kind == "grok_bot":
         return "grok"
     if name in catalog.VENDOR_BY_ENTRY and config_store.entry_type(merged, "LLM", name) == "openai":
         return "api"
@@ -382,7 +385,7 @@ def vendor_test_config(vendor_id: str, payload: dict, merged: dict) -> dict:
 def desired_intent(merged: dict, llm_name: str, path: Path = None):
     """切换大模型后意图识别应该是什么：Claude CLI 只能用 nointent；
     API 模型恢复用户上次在 API 模式下的选择，没有选过时 Claude 用 nointent、其他用 function_call。"""
-    if config_store.entry_type(merged, "LLM", llm_name) == "claude_cli":
+    if config_store.entry_type(merged, "LLM", llm_name) in ("claude_cli", "codex_cli"):
         return "nointent"
     pref = (config_store.load_custom(path).get("admin") or {}).get("api_intent")
     if pref in catalog.INTENT_MODES:
@@ -744,7 +747,7 @@ def describe_intent(merged: dict) -> dict:
     return {
         "selected": name,
         "mode": mode if mode in catalog.INTENT_MODES else "other",
-        "locked": llm_kind(merged) == "cli",
+        "locked": llm_kind(merged) in ("cli", "codex"),
         "plugins": [{**p, "enabled": p["name"] in functions,
                      "needs_config": bool(p.get("config")) and not plugin_configured(merged, p["config"])}
                     for p in catalog.PLUGINS],
@@ -807,6 +810,9 @@ def call_targets(merged: dict) -> list:
     if config_store.entry_type(merged, "LLM", CLAUDE_CLI_ENTRY) == "claude_cli":
         result.append({"entry": CLAUDE_CLI_ENTRY, "label": "Claude（本机 Claude Code）",
                        "defaults": list(call_names.DEFAULT_MODELS[CLAUDE_CLI_ENTRY])})
+    if config_store.entry_type(merged, "LLM", "CodexCLI") == "codex_cli":
+        result.append({"entry": "CodexCLI", "label": "Codex（本机 Codex CLI）",
+                       "defaults": list(call_names.DEFAULT_MODELS["CodexCLI"])})
     for g in grok_entries(merged):
         if g["bot_id"]:
             result.append({"entry": g["entry"], "label": f"{g['bot_name']}（Grok Bot）",
