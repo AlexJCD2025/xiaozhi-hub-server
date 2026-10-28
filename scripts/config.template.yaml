@@ -58,6 +58,29 @@ LLM:
     progress_interval_seconds: 30       # 大约在第 30、60、120 秒报一次进度
     progress_reply: 还在处理，请稍等
 
+  # 儿童模式：只和一个 OpenAI 兼容接口聊天。默认不选中，也不会碰 Codex、命令和文件。
+  # 密钥用环境变量，不要写在这个文件里：
+  #   KID_MODE_API_KEY、KID_MODE_BASE_URL、KID_MODE_MODEL
+  # 要让设备一连上就用它：把上面的 selected_module.LLM 改成 KidMode，Intent 保持 nointent。
+  KidMode:
+    type: kid_mode
+    base_url: ""
+    model_name: ""
+    api_key: ""
+    temperature: 0.6
+    max_tokens: 180
+    isolate: true
+    safety_enabled: true
+    moderation: false
+    extra_block_phrases: []
+    extra_persona: ""
+    max_turns_per_day: 0
+    quiet_hours: ""
+    conversation_log: true
+    log_max_bytes: 1000000
+    log_backups: 5
+    history_limit: 16
+
   # Claude API（OpenAI 兼容接口），在管理后台填写 API Key 后可切换使用
   ClaudeAPI:
     type: openai

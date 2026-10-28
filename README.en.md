@@ -46,6 +46,7 @@ listens, speaks      recognizes, routes by name, synthesizes      thinks and doe
 - **LLM APIs**: Claude, OpenAI, Gemini, DeepSeek, Qwen, Doubao, Zhipu GLM, Kimi, and any OpenAI-compatible API.
 - **Grok Bot**: hand tasks to xAI's cloud AI teammates. Sign in with your Cursor account in the admin console, tick the Bots you want, give them call names, then say "嗨 孙悟空, summarize this week's X trends" and the reply is read out. You can stop waiting on a long task; when the Bot finishes in the cloud, the device reports back. This uses the same private endpoints as the desktop app, not an official API, so an app update may break it.
 - **Codex CLI**: On a Mac, the device can talk to a locally installed Codex CLI that is already logged in with ChatGPT. Read-only turns run immediately; writes wait for a tap or a spoken confirmation. Setup and limits are in the Chinese README, section「本机 Codex CLI」.
+- **Kid mode**: A separate chat-only profile for a child. It calls an OpenAI-compatible API and cannot reach Codex, the shell, files, or other agents. Setup is in the Chinese README, section「儿童模式」.
 
 **Long tasks, with you all the way**
 

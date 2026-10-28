@@ -75,6 +75,11 @@ def model_ready(config: dict, name: str) -> bool:
             return False
     if kind == "grok_bot" and not str(entry.get("bot_id") or "").strip():
         return False
+    if kind == "kid_mode":
+        from core.providers.llm.kid_mode.settings import resolve_kid_config
+
+        resolved = resolve_kid_config(entry)
+        return resolved.ready
     return True
 
 
@@ -85,6 +90,8 @@ def model_label(name: str) -> str:
         return "Claude"
     if name == CODEX_CLI_ENTRY:
         return "Codex"
+    if name == "KidMode":
+        return "儿童模式"
     if name.startswith(GROK_BOT_PREFIX):
         return name[len(GROK_BOT_PREFIX):] or "Grok Bot"
     vendor = catalog.VENDOR_BY_ENTRY.get(name)
@@ -173,7 +180,12 @@ def on_conn_open(conn: "ConnectionHandler") -> None:
     if conn.llm is not None:
         _attach(conn, conn.llm)
     name = remembered(conn)
-    if name and name != st["current"] and model_ready(_server_config(conn), name):
+    if (
+        name
+        and name != st["current"]
+        and model_ready(_server_config(conn), name)
+        and not _kid_isolates(conn, st["current"])
+    ):
         try:
             switch(conn, name, remember=False)
             logger.bind(tag=TAG).info(f"设备 {_device_key(conn)} 沿用上次的模型 {name}")
@@ -186,7 +198,13 @@ def on_conn_open(conn: "ConnectionHandler") -> None:
 
 
 def switch(conn: "ConnectionHandler", name: str, remember: bool = True) -> bool:
-    """把这个连接切到指定模型。模型没配置好时返回 False，不切换。"""
+    """把这个连接切到指定模型。模型没配置好时返回 False，不切换。
+
+    儿童模式默认隔离：正在用它时，呼名不能切到 Codex 或其他 agent。
+    """
+    if _kid_isolates(conn, _state(conn).get("current")) and name != _state(conn).get("current"):
+        logger.bind(tag=TAG).info(f"儿童模式已隔离，不切换到 {name}")
+        return False
     if not model_ready(_server_config(conn), name):
         return False
     st = _state(conn)
@@ -211,6 +229,12 @@ async def on_conn_open_async(conn: "ConnectionHandler") -> None:
 
 async def switch_async(conn: "ConnectionHandler", name: str) -> bool:
     return await asyncio.get_running_loop().run_in_executor(None, switch, conn, name)
+
+
+def _kid_isolates(conn: "ConnectionHandler", name: Optional[str]) -> bool:
+    from core.providers.llm.kid_mode.settings import kid_isolates
+
+    return kid_isolates(_server_config(conn), name)
 
 
 def on_conn_close(conn: "ConnectionHandler") -> None:

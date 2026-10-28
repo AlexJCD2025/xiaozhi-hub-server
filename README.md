@@ -44,6 +44,7 @@
 - **叫名字换 AI**：说"嗨 Claude"交给 Claude Code，说"嗨 Codex"交给本机 Codex CLI，说"嗨 DeepSeek"交给 DeepSeek，称呼在管理后台配。每个 AI 各聊各的，每台设备记得上次用的是哪个。
 - **Claude Code**：用你在本机登录的账号干活，比如"把这周的笔记整理成一份清单"。
 - **Codex CLI**：在 Mac 上用已经登录 ChatGPT 的 Codex CLI 回答。只读查看直接说；删除、写入、部署或发消息之前，要在设备上点一下确认。用法见下面的 [本机 Codex CLI](#本机-codex-cli)。
+- **儿童模式**：给孩子用的双语聊天。只连接一个 OpenAI 兼容接口，不能碰 Codex、命令、文件和其他 agent。用法见 [儿童模式](#儿童模式)。
 - **大模型 API**：Claude、OpenAI、Gemini、DeepSeek、通义千问、豆包、智谱 GLM、Kimi，以及任意 OpenAI 兼容接口。
 - **Grok Bot**：给 xAI 的云端 AI 同事派活。在后台用 Cursor 账号登录、勾选 Bot、配上称呼，说"嗨 孙悟空，帮我把这周的 X 热点整理一下"，它的回复会念出来。长任务可以打断不等，它在云端做完后设备会主动汇报。走的是 App 用的内部接口，不是官方 API，App 升级后可能失效。
 
@@ -185,12 +186,92 @@ http://<Mac 的局域网 IP>:16688/xiaozhi/ota/
 - 管理后台没有单独的 Codex 设置页，参数写在 `data/.config.yaml`。状态页只检查能不能找到 `codex`，不检查有没有登录。
 - 日志会藏起密钥，也不会把整段提示词写进去。
 
+## 儿童模式
+
+给大约十二岁的孩子一台只聊天的 StackChan。它按大约十三到十五岁的口气说话，中文英文都会接，回答适合朗读。这一档和 Codex 分开：没有命令行，没有文件，没有账号，也不能呼名切到别的 agent。可以单独跑在家里的 Mac 上，也可以跑在一台 Ubuntu 服务器上。
+
+你需要自己准备一个 OpenAI 兼容接口的密钥。可以是 xAI 的 Grok API（`https://api.x.ai/v1`），也可以是国内的兼容接口。模型名以服务商控制台为准。
+
+### 要设置的环境变量
+
+不要把密钥写进 Git。启动服务之前：
+
+```bash
+export KID_MODE_API_KEY="你的密钥"
+export KID_MODE_BASE_URL="https://api.x.ai/v1"   # 或国内兼容接口的地址，末尾一般带 /v1
+export KID_MODE_MODEL="控制台里的模型名"
+```
+
+Ubuntu 上如果用开机自启，把这三行放进服务的环境，而不是写进 `data/.config.yaml`。
+
+### 配置
+
+在 `data/.config.yaml` 里让这台设备一连上就用儿童模式（可以照抄 `scripts/config.template.yaml` 里的 `KidMode`）：
+
+```yaml
+selected_module:
+  LLM: KidMode
+  Intent: nointent
+
+LLM:
+  KidMode:
+    type: kid_mode
+    base_url: ""          # 空着就用上面的环境变量
+    model_name: ""
+    api_key: ""
+    isolate: true         # 孩子说「嗨 Codex」也不会切走
+    safety_enabled: true
+    max_turns_per_day: 0  # 0 表示不限制。想限制就填每天最多几轮
+    quiet_hours: ""       # 例如 21:30-07:00，时区固定是 Asia/Shanghai。留空表示不启用
+    conversation_log: true
+```
+
+`Intent` 必须是 `nointent`。后台如果选了「用插件」，保存时会被拒绝。默认不限制次数，也不设安静时段；这两项要自己打开。
+
+对话记在 `main/xiaozhi-server/data/kid_mode/chat.jsonl`，文件变大后会滚动留下几份。里面会藏起密码和密钥。不想留记录就把 `conversation_log` 改成 `false`。
+
+### Mac 上怎么跑
+
+1. 按[快速开始](#快速开始)装好并启动服务。
+2. 设好上面三个环境变量，写好 `KidMode`，重启服务。
+3. 电脑和 StackChan 在同一个局域网。配网页的「高级选项」里，OTA 地址填：
+
+```
+http://<Mac 的局域网 IP>:16688/xiaozhi/ota/
+```
+
+设备随后连的语音地址由 OTA 下发，默认是这台电脑的 `16689` 端口。管理后台是 `http://127.0.0.1:16688/admin`，第一次打开先设密码。状态页会检查接口、模型和密钥有没有填，不会把密钥显示出来。
+
+### Ubuntu 服务器上怎么跑
+
+安装方法和 Mac 一样。另外：
+
+1. 安全组或防火墙放行 `16688`（OTA 和管理后台）和 `16689`（语音）。
+2. 在 `data/.config.yaml` 的 `server:` 下写上公网地址，否则设备拿到的是内网 IP：
+
+```yaml
+server:
+  websocket: ws://<服务器的公网 IP 或域名>:16689/xiaozhi/v1/
+```
+
+3. 配网时 OTA 地址填 `http://<公网 IP>:16688/xiaozhi/ota/`。
+4. 马上设置管理后台密码。儿童模式本身不能操作服务器，但后台密码仍然要设。
+
+### 它会拦住什么
+
+人设里写了规则，发送前和收到回复后还会再查一遍。拦住的包括：色情、血腥暴力、自伤（会温和地请孩子告诉爸爸妈妈，不会讲方法）、烟酒毒品、赌博、仇恨、危险做法，以及地址、学校名称、密码这类隐私。日常说法不会拦，例如「学校作业」「杀死细菌」。
+
+`moderation: true` 时，会再试一次接口上的审核端点。对方没有这个接口就只用关键词，聊天不会因此停掉。家长还可以加 `extra_block_phrases`。
+
+不需要改 StackChan 固件。孩子直接说话就行。
+
 ## 安全提示
 
 - 部署在自己的电脑上时，只在局域网内使用，不要把端口暴露到公网。
 - 部署到云端服务器时，设备连接和管理后台都在公网上，请用防火墙限制访问；服务启动后尽快打开管理后台，设置足够强的管理密码。
 - Claude Code 默认只能读取工作目录 `~/xiaozhi-workspace` 里的文件。在管理后台放开写文件、执行命令后，语音指令就能修改文件、执行命令，请谨慎；其中执行命令（Auto 级别）不受工作目录限制。
 - Codex CLI 计划阶段是只读沙箱。写入、删除、部署或发消息必须在设备上明确确认，确认后也只使用 `workspace-write`，不会绕过沙箱。
+- 儿童模式只连接一个聊天接口，不能使用 Codex、命令、文件或其他 agent。密钥放在环境变量里，不要写进仓库。
 
 ## 关于本仓库
 

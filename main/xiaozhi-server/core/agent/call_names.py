@@ -219,10 +219,14 @@ async def handle_call_name(conn: "ConnectionHandler", text: str):
     cfg = conn.config.get("call_names") or {}
     if not cfg.get("enabled", True):
         return text
+    from core.agent import llm_router
+
+    current = (getattr(conn, "hub_route", None) or {}).get("current") or llm_router.default_name(conn)
+    if llm_router._kid_isolates(conn, current):
+        return text
     hit = match_call_name(text, cfg.get("models") or DEFAULT_MODELS)
     if hit is None:
         return text
-    from core.agent import llm_router
 
     model, rest = hit
     model = llm_router.entry_name(model)

@@ -118,6 +118,9 @@ def describe_stages(merged: dict) -> list:
     elif llm.get("type") == "codex_cli":
         llm_value = f"Codex CLI · {llm.get('model') or 'gpt-5.6-sol'}"
         llm_hint = "写入、删除、部署或发消息前，要在设备上确认"
+    elif llm.get("type") == "kid_mode":
+        llm_value = f"儿童模式 · {llm.get('model_name') or llm.get('model') or '未配置'}"
+        llm_hint = "只聊天，不使用工具、文件和本机 Agent"
     else:
         llm_value = _llm_label(llm_name, llm)
         llm_hint = str(llm.get("model_name") or "")

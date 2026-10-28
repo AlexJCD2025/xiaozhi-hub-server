@@ -337,7 +337,8 @@ def test_describe_call_names_defaults(cfg_path):
     assert "cloud" in d["models"][0]["aliases"] and d["models"][1]["ready"] is True
     assert d["models"][0]["ready"] is True
     # API 厂商都还没填 Key，不能选。本机 Codex 和 Claude 一样，配置里有条目就能配称呼。
-    assert [t["entry"] for t in d["targets"]] == ["ClaudeCLI", "CodexCLI"]
+    # 儿童模式只聊天，条目在配置里就会出现，方便单独给它配称呼。
+    assert [t["entry"] for t in d["targets"]] == ["ClaudeCLI", "CodexCLI", "KidMode"]
 
 
 def _configure_deepseek(path):
