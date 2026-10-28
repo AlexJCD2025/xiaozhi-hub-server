@@ -647,6 +647,27 @@ LLM:
     confirm_timeout_seconds: 45
     filler_delay_seconds: 2
     progress_interval_seconds: 30
+  # 儿童模式：只聊天，不使用 Codex、命令行、文件或其他 agent。默认不选中。
+  # 密钥放在环境变量里，不要写进这个文件。说明见仓库 README 的「儿童模式」一节。
+  # 要让这台设备一连上就用它：把 selected_module.LLM 改成 KidMode，Intent 保持 nointent。
+  KidMode:
+    type: kid_mode
+    base_url: ""                  # 空着就读环境变量 KID_MODE_BASE_URL，例如 https://api.x.ai/v1
+    model_name: ""                # 空着就读 KID_MODE_MODEL
+    api_key: ""                   # 空着就读 KID_MODE_API_KEY，不要把真密钥写在这里
+    temperature: 0.6
+    max_tokens: 180
+    isolate: true                 # 正在用儿童模式时，呼名不能切到其他模型
+    safety_enabled: true
+    moderation: false             # 为 true 时额外调用接口的 /moderations；没有这个接口就自动退回关键词
+    extra_block_phrases: []
+    extra_persona: ""
+    max_turns_per_day: 0          # 0 表示不限制。按 Asia/Shanghai 的自然日计算
+    quiet_hours: ""               # 例如 21:30-07:00。留空表示不启用。时区是 Asia/Shanghai
+    conversation_log: true        # 对话记在 data/kid_mode/chat.jsonl，给家长看
+    log_max_bytes: 1000000
+    log_backups: 5
+    history_limit: 16
   # 所有openai类型均可以修改超参，以AliLLM为例
   # 当前支持的type为openai、dify、ollama，可自行适配
   AliLLM:

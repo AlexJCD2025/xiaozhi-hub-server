@@ -96,6 +96,17 @@ def collect_status(config: dict, merged: dict) -> dict:
         if intent_type != "nointent":
             checks.append(_check("意图识别", False, f"使用 Codex CLI 时应设为 nointent，当前为 {intent_type}",
                                  level="warn"))
+    elif llm_type == "kid_mode":
+        from core.providers.llm.kid_mode.settings import resolve_kid_config
+
+        resolved = resolve_kid_config(llm_entry)
+        missing = [name for name, ok in (("接口地址", resolved.base_url), ("模型", resolved.model), ("密钥", resolved.api_key)) if not ok]
+        detail = "接口已配置，密钥不会显示在这里" if not missing else "缺少 " + "、".join(missing) + "（可写在环境变量 KID_MODE_API_KEY / KID_MODE_BASE_URL / KID_MODE_MODEL）"
+        checks.append(_check("儿童模式", not missing, detail))
+        intent_type = config_store.entry_type(merged, "Intent")
+        if intent_type != "nointent":
+            checks.append(_check("意图识别", False, f"使用儿童模式时应设为 nointent，当前为 {intent_type}",
+                                 level="warn"))
     else:
         secrets = [k for k in llm_entry if config_store.SECRET_FIELD.search(k)]
         missing = [k for k in secrets if config_store.is_placeholder(llm_entry.get(k))]
